@@ -50,11 +50,25 @@ final class DrawingCanvas: NSView {
     private var trackingArea: NSTrackingArea?
     private var lastMouseDownTime: TimeInterval = 0
 
+    // Snapping during a drag.
+    private var snapper: Snapper?
+    private var guides: [SnapGuide] = []
+    private var haptics = SnapHaptics()
+    /// Bounds of the selection when a move began.
+    private var moveStartBounds: TSDRect?
+    private var defaultsObserver: NSObjectProtocol?
+
     // MARK: Setup
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         window?.acceptsMouseMovedEvents = true
+        if defaultsObserver == nil {
+            // Grid settings live in user defaults and change from the View menu.
+            defaultsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.needsDisplay = true }
+            }
+        }
         if let s = state, s.needsZoomToFit, bounds.width > 10 {
             scheduleFit()
         }
@@ -140,6 +154,7 @@ final class DrawingCanvas: NSView {
         ctx.setFillColor(CGColor(gray: 1, alpha: 1))
         ctx.fill(pageRect)
         ctx.restoreGState()
+        if GridPrefs.showGrid { drawGrid(in: ctx, state: s, pageRect: pageRect) }
 
         // Objects, in document space.
         ctx.saveGState()
@@ -159,6 +174,93 @@ final class DrawingCanvas: NSView {
         ctx.restoreGState()
 
         drawSelection(in: ctx, state: s, live: live)
+        drawGuides(in: ctx, state: s)
+    }
+
+    /// Minor lines every grid spacing, stronger major lines; whichever are too dense at
+    /// this zoom are left out. Lines start from the page's bottom-left corner.
+    private func drawGrid(in ctx: CGContext, state s: EditorState, pageRect: CGRect) {
+        let spacing = GridPrefs.spacing
+        let major = spacing * Double(GridPrefs.majorEvery)
+        let minPx = 6.0
+        ctx.saveGState()
+        ctx.clip(to: pageRect)
+        ctx.setLineWidth(1)
+        func lines(every step: Double, color: CGColor) {
+            guard step * Double(s.zoom) >= minPx else { return }
+            ctx.setStrokeColor(color)
+            let page = s.doc.pageSize
+            var x = 0.0
+            while x <= page.width + 1e-9 {
+                let vx = (s.toView(TSDPoint(x: x, y: 0)).x).rounded() + 0.5
+                ctx.move(to: CGPoint(x: vx, y: pageRect.minY)); ctx.addLine(to: CGPoint(x: vx, y: pageRect.maxY))
+                x += step
+            }
+            var y = 0.0
+            while y <= page.height + 1e-9 {
+                let vy = (s.toView(TSDPoint(x: 0, y: y)).y).rounded() + 0.5
+                ctx.move(to: CGPoint(x: pageRect.minX, y: vy)); ctx.addLine(to: CGPoint(x: pageRect.maxX, y: vy))
+                y += step
+            }
+            ctx.strokePath()
+        }
+        if GridPrefs.majorEvery > 1 {
+            lines(every: spacing, color: CGColor(srgbRed: 0.25, green: 0.5, blue: 1, alpha: 0.10))
+        }
+        lines(every: major, color: CGColor(srgbRed: 0.25, green: 0.5, blue: 1, alpha: 0.24))
+        ctx.restoreGState()
+    }
+
+    private func drawGuides(in ctx: CGContext, state s: EditorState) {
+        guard !guides.isEmpty else { return }
+        ctx.saveGState()
+        ctx.setStrokeColor(NSColor.systemPink.cgColor)
+        ctx.setLineWidth(1)
+        let pad = 4.0 / Double(s.zoom) * 3
+        for g in guides {
+            switch g.axis {
+            case .vertical:
+                let a = s.toView(TSDPoint(x: g.position, y: g.from - pad)), b = s.toView(TSDPoint(x: g.position, y: g.to + pad))
+                let x = a.x.rounded() + 0.5
+                ctx.move(to: CGPoint(x: x, y: a.y)); ctx.addLine(to: CGPoint(x: x, y: b.y))
+            case .horizontal:
+                let a = s.toView(TSDPoint(x: g.from - pad, y: g.position)), b = s.toView(TSDPoint(x: g.to + pad, y: g.position))
+                let y = a.y.rounded() + 0.5
+                ctx.move(to: CGPoint(x: a.x, y: y)); ctx.addLine(to: CGPoint(x: b.x, y: y))
+            }
+        }
+        ctx.strokePath()
+        ctx.restoreGState()
+    }
+
+    // MARK: Snapping
+
+    /// Snapping is on unless Command is held during the drag.
+    private func snappingEnabled(_ event: NSEvent) -> Bool {
+        !event.modifierFlags.contains(.command)
+    }
+
+    private func beginSnapping(excluding ids: Set<UUID>, event: NSEvent) {
+        guard let s = state else { return }
+        snapper = Snapper(state: s, excluding: ids, enabled: true)
+        haptics.reset()
+        guides = []
+    }
+
+    /// Snaps a point if snapping is on, updating the guides and haptics.
+    private func snapped(_ p: TSDPoint, event: NSEvent) -> TSDPoint {
+        guard let snapper, snappingEnabled(event) else { guides = []; haptics.reset(); return p }
+        let (q, result) = snapper.snap(point: p)
+        guides = result.guides
+        haptics.update(result.objectSnapKey)
+        return q
+    }
+
+    private func endSnapping() {
+        snapper = nil
+        guides = []
+        haptics.reset()
+        moveStartBounds = nil
     }
 
     private func liveTransform() -> Affine? {
@@ -323,13 +425,14 @@ final class DrawingCanvas: NSView {
         guard let s = state else { return }
         window?.makeFirstResponder(self)
         let vp = convert(event.locationInWindow, from: nil)
-        let p = docPoint(event)
+        var p = docPoint(event)
         let shift = event.modifierFlags.contains(.shift)
         let isDouble = event.clickCount >= 2
 
         switch s.tool {
         case .select:
             if let h = handleIndex(at: vp), let b = s.selectionBounds {
+                beginSnapping(excluding: s.selection, event: event)
                 drag = .scale(handle: h, bounds: b, current: p)
             } else if let hit = hitTest(p) {
                 if isDouble, case .text = hit.shape {
@@ -344,14 +447,20 @@ final class DrawingCanvas: NSView {
                 } else if !s.selection.contains(hit.id) {
                     s.selection = [hit.id]
                 }
+                beginSnapping(excluding: s.selection, event: event)
+                moveStartBounds = s.selectionBounds
                 drag = .move(start: p, current: p, moved: false)
             } else {
                 if !shift { s.selection = [] }
                 drag = .marquee(start: p, current: p)
             }
         case .rectangle, .ellipse, .line, .arc:
+            beginSnapping(excluding: [], event: event)
+            p = snapped(p, event: event)
             drag = .create(start: p, current: p, shift: shift)
         case .pen:
+            beginSnapping(excluding: [], event: event)
+            p = snapped(p, event: event)
             if isDouble { finishPen(close: false); return }
             if let first = penSegments.first?.endPoint, penSegments.count >= 2, p.distance(to: first) <= 6.0 / Double(s.zoom) {
                 finishPen(close: true)
@@ -363,7 +472,10 @@ final class DrawingCanvas: NSView {
                 s.selection = [hit.id]
                 s.focusTextRequest += 1
             } else {
-                var t = TextData(string: "Text", origin: p, fontFace: s.newTextFace, fontSize: s.newTextSize)
+                beginSnapping(excluding: [], event: event)
+                let origin = snapped(p, event: event)
+                endSnapping()
+                var t = TextData(string: "Text", origin: origin, fontFace: s.newTextFace, fontSize: s.newTextSize)
                 t.anchor = .zero
                 var style = s.newShapeStyle
                 style.strokeColor = style.strokeColor ?? .black
@@ -381,9 +493,25 @@ final class DrawingCanvas: NSView {
         let p = docPoint(event)
         switch drag {
         case .marquee(let start, _): drag = .marquee(start: start, current: p)
-        case .move(let start, _, _): drag = .move(start: start, current: p, moved: p.distance(to: start) * Double(state?.zoom ?? 1) > 2)
-        case .scale(let h, let b, _): drag = .scale(handle: h, bounds: b, current: p)
-        case .create(let start, _, _): drag = .create(start: start, current: p, shift: event.modifierFlags.contains(.shift))
+        case .move(let start, _, let wasMoved):
+            let moved = wasMoved || p.distance(to: start) * Double(state?.zoom ?? 1) > 2
+            var dx = p.x - start.x, dy = p.y - start.y
+            let lockX = event.modifierFlags.contains(.shift) && abs(dx) <= abs(dy)
+            let lockY = event.modifierFlags.contains(.shift) && abs(dx) > abs(dy)
+            if lockX { dx = 0 }
+            if lockY { dy = 0 }
+            if moved, let snapper, snappingEnabled(event), let b = moveStartBounds {
+                let result = snapper.snap(box: TSDRect(minX: b.minX + dx, minY: b.minY + dy, maxX: b.maxX + dx, maxY: b.maxY + dy))
+                if !lockX { dx += result.offset.dx }
+                if !lockY { dy += result.offset.dy }
+                guides = result.guides.filter { ($0.axis == .vertical && !lockX) || ($0.axis == .horizontal && !lockY) }
+                haptics.update(result.objectSnapKey)
+            } else {
+                guides = []
+            }
+            drag = .move(start: start, current: TSDPoint(x: start.x + dx, y: start.y + dy), moved: moved)
+        case .scale(let h, let b, _): drag = .scale(handle: h, bounds: b, current: snapped(p, event: event))
+        case .create(let start, _, _): drag = .create(start: start, current: snapped(p, event: event), shift: event.modifierFlags.contains(.shift))
         case .penDrag(let anchor, _): drag = .penDrag(anchor: anchor, current: p)
         case .none: break
         }
@@ -392,7 +520,13 @@ final class DrawingCanvas: NSView {
 
     override func mouseUp(with event: NSEvent) {
         guard let s = state else { return }
-        let p = docPoint(event)
+        defer { endSnapping() }
+        var p = docPoint(event)
+        // Use the snapped position from the last drag event.
+        switch drag {
+        case .scale(_, _, let c), .create(_, let c, _): p = c
+        default: break
+        }
         switch drag {
         case .marquee(let start, _):
             let r = TSDRect(p1: start, p2: p)
@@ -403,11 +537,9 @@ final class DrawingCanvas: NSView {
                 }.map { $0.id }
                 if event.modifierFlags.contains(.shift) { s.selection.formUnion(hits) } else { s.selection = Set(hits) }
             }
-        case .move(let start, _, let moved):
+        case .move(let start, let current, let moved):
             if moved {
-                var dx = p.x - start.x, dy = p.y - start.y
-                if event.modifierFlags.contains(.shift) { if abs(dx) > abs(dy) { dy = 0 } else { dx = 0 } }
-                s.transformSelection(.translation(dx, dy))
+                s.transformSelection(.translation(current.x - start.x, current.y - start.y))
             }
         case .scale(let h, let b, _):
             s.transformSelection(scaleTransform(handle: h, bounds: b, to: p), actionName: "Resize")
@@ -439,8 +571,14 @@ final class DrawingCanvas: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        mouseLocation = docPoint(event)
-        if state?.tool == .pen, !penSegments.isEmpty { needsDisplay = true }
+        var p = docPoint(event)
+        if let s = state, s.tool == .pen, !penSegments.isEmpty {
+            // Show where the next point would snap.
+            if snapper == nil { snapper = Snapper(state: s, excluding: [], enabled: true) }
+            p = snapped(p, event: event)
+            needsDisplay = true
+        }
+        mouseLocation = p
     }
 
     override func rightMouseDown(with event: NSEvent) {

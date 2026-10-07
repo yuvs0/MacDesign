@@ -104,6 +104,35 @@ struct PropertiesPanel: View {
             if let o = single {
                 Toggle("Locked", isOn: Binding(get: { o.isLocked }, set: { v in state.updateSelected("Lock") { $0.isLocked = v } }))
             }
+            alignRow
+        }
+    }
+
+    /// Six alignment buttons; one object aligns to the page, several to each other.
+    private var alignRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Text(state.alignsToPage ? "Align to page" : "Align")
+                Spacer()
+                ForEach(EditorState.AlignEdge.allCases, id: \.self) { edge in
+                    Button { state.align(edge) } label: {
+                        Image(systemName: edge.systemImage)
+                            .frame(width: 18, height: 18)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(edge.title)
+                }
+            }
+            if selected.count >= 3 {
+                HStack(spacing: 4) {
+                    Text("Distribute")
+                    Spacer()
+                    Button { state.distribute(horizontally: true) } label: { Image(systemName: "distribute.horizontal.center").frame(width: 18, height: 18) }
+                        .buttonStyle(.borderless).help("Equal horizontal gaps")
+                    Button { state.distribute(horizontally: false) } label: { Image(systemName: "distribute.vertical.center").frame(width: 18, height: 18) }
+                        .buttonStyle(.borderless).help("Equal vertical gaps")
+                }
+            }
         }
     }
 

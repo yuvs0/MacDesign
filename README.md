@@ -43,6 +43,15 @@ swift run tsdconv --format svg -o ~/Desktop/out ~/Downloads/  # whole folder
 - **Layers** tab: visibility and lock per layer and per object, drag objects to reorder,
   arrows to reorder layers, double-click a layer name to rename, `+` / `−` to add or
   delete layers. The active layer receives new shapes.
+- **Snapping**: while you draw, move or resize, edges, centres and corners snap to other
+  objects and to the page, with pink guide lines and a trackpad click when a snap engages.
+  Hold ⌘ to drag without snapping. **View > Snap to Objects** and **Snap to Grid** turn
+  each kind on or off; **View > Haptic Feedback When Snapping** silences the click.
+- **Grid**: **View > Show Grid** (⌘'), spacing from the **Grid Spacing** submenu (or
+  **Other…** for any value), with heavier major lines every few lines.
+- **Align**: the align button in the toolbar, **Object > Align**, or the row in the
+  inspector. One selected object aligns to the page; several align to each other. With
+  three or more, distribute spaces them evenly.
 - **Object** menu: group, ungroup, bring forward or send backward.
 - **File > Save** writes `.3vs`. **Export** (toolbar) writes SVG, DXF, PDF or PNG.
 - Pinch or ⌘-scroll to zoom, two-finger scroll to pan, ⌘0 to fit the page.

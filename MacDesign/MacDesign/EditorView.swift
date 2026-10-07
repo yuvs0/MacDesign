@@ -72,6 +72,10 @@ struct EditorToolbar: ToolbarContent {
             }
             .help("Export the drawing for other software")
 
+            AlignMenu(state: state)
+                .labelStyle(.iconOnly)
+                .help("Align or distribute the selected objects")
+
             Button {
                 state.showInspector.toggle()
             } label: {
@@ -186,6 +190,12 @@ extension FocusedValues {
 
 struct EditorCommands: Commands {
     @FocusedValue(\.editorState) private var state
+    @AppStorage(GridPrefs.showGridKey) private var showGrid = false
+    @AppStorage(GridPrefs.snapToGridKey) private var snapToGrid = false
+    @AppStorage(GridPrefs.snapToObjectsKey) private var snapToObjects = true
+    @AppStorage(GridPrefs.gridSpacingKey) private var gridSpacing = 5.0
+    @AppStorage(GridPrefs.majorEveryKey) private var majorEvery = 2
+    @AppStorage(GridPrefs.hapticsKey) private var haptics = true
 
     var body: some Commands {
         CommandGroup(after: .pasteboard) {
@@ -216,6 +226,8 @@ struct EditorCommands: Commands {
             Button("Send to Back") { state?.arrange(.back) }
                 .keyboardShortcut("[", modifiers: [.command, .option])
             Divider()
+            AlignMenu(state: state)
+            Divider()
             ForEach(Tool.allCases) { tool in
                 Button("\(tool.title) Tool") { state?.tool = tool }
                     .keyboardShortcut(KeyEquivalent(tool.shortcut), modifiers: [.command, .control])
@@ -229,8 +241,61 @@ struct EditorCommands: Commands {
             Button("Zoom to Fit") { state?.needsZoomToFit = true }
                 .keyboardShortcut("0", modifiers: .command)
             Divider()
+            Toggle("Show Grid", isOn: $showGrid)
+                .keyboardShortcut("'", modifiers: .command)
+            Toggle("Snap to Grid", isOn: $snapToGrid)
+                .keyboardShortcut("'", modifiers: [.command, .shift])
+            Toggle("Snap to Objects", isOn: $snapToObjects)
+                .keyboardShortcut(";", modifiers: [.command, .shift])
+            Menu("Grid Spacing") {
+                ForEach(GridPrefs.spacingPresets, id: \.self) { v in
+                    Toggle(GridPrefs.spacingLabel(v), isOn: Binding(get: { abs(gridSpacing - v) < 1e-9 }, set: { if $0 { gridSpacing = v } }))
+                }
+                if !GridPrefs.spacingPresets.contains(where: { abs($0 - gridSpacing) < 1e-9 }) {
+                    Toggle(GridPrefs.spacingLabel(gridSpacing), isOn: .constant(true))
+                }
+                Divider()
+                Button("Other…") { GridPrefs.askForCustomSpacing() }
+            }
+            Menu("Major Lines") {
+                ForEach(GridPrefs.majorPresets, id: \.self) { n in
+                    Toggle(n == 1 ? "None" : "Every \(n) lines", isOn: Binding(get: { majorEvery == n }, set: { if $0 { majorEvery = n } }))
+                }
+            }
+            Toggle("Haptic Feedback When Snapping", isOn: $haptics)
+            Divider()
             Button("Show Inspector") { state?.showInspector.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .option])
         }
+    }
+}
+
+
+/// Align and distribute items, used in the Object menu and the toolbar.
+struct AlignMenu: View {
+    let state: EditorState?
+
+    private var count: Int { state?.selection.count ?? 0 }
+
+    var body: some View {
+        Menu("Align") {
+            ForEach([EditorState.AlignEdge.left, .centreX, .right], id: \.self) { edge in
+                Button(edge.title, systemImage: edge.systemImage) { state?.align(edge) }
+            }
+            Divider()
+            ForEach([EditorState.AlignEdge.top, .centreY, .bottom], id: \.self) { edge in
+                Button(edge.title, systemImage: edge.systemImage) { state?.align(edge) }
+            }
+            Divider()
+            Button("Distribute Horizontally", systemImage: "distribute.horizontal.center") { state?.distribute(horizontally: true) }
+                .disabled(count < 3)
+            Button("Distribute Vertically", systemImage: "distribute.vertical.center") { state?.distribute(horizontally: false) }
+                .disabled(count < 3)
+            if count == 1 {
+                Divider()
+                Text("One object aligns to the page")
+            }
+        }
+        .disabled(count == 0)
     }
 }

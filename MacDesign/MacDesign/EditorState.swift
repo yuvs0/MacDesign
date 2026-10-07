@@ -261,6 +261,99 @@ final class EditorState: ObservableObject {
         }
     }
 
+    // MARK: Align and distribute
+
+    enum AlignEdge: CaseIterable {
+        case left, centreX, right, top, centreY, bottom
+
+        var title: String {
+            switch self {
+            case .left: return "Align Left Edges"
+            case .centreX: return "Align Horizontal Centres"
+            case .right: return "Align Right Edges"
+            case .top: return "Align Top Edges"
+            case .centreY: return "Align Vertical Centres"
+            case .bottom: return "Align Bottom Edges"
+            }
+        }
+
+        var shortTitle: String {
+            switch self {
+            case .left: return "Left"
+            case .centreX: return "Centre"
+            case .right: return "Right"
+            case .top: return "Top"
+            case .centreY: return "Middle"
+            case .bottom: return "Bottom"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .left: return "align.horizontal.left"
+            case .centreX: return "align.horizontal.center"
+            case .right: return "align.horizontal.right"
+            case .top: return "align.vertical.top"
+            case .centreY: return "align.vertical.center"
+            case .bottom: return "align.vertical.bottom"
+            }
+        }
+    }
+
+    /// With one object selected, alignment is to the page; with several, to their combined bounds.
+    var alignsToPage: Bool { selection.count == 1 }
+
+    func align(_ edge: AlignEdge) {
+        let objs = selectedObjects.filter { isEditable($0) }
+        guard !objs.isEmpty else { return }
+        let page = TSDRect(minX: 0, minY: 0, maxX: doc.pageSize.width, maxY: doc.pageSize.height)
+        guard let reference = objs.count == 1 ? page : selectionBounds else { return }
+        var moves: [UUID: Affine] = [:]
+        for o in objs {
+            guard let b = objectBounds(o) else { continue }
+            var dx = 0.0, dy = 0.0
+            switch edge {
+            case .left: dx = reference.minX - b.minX
+            case .centreX: dx = reference.center.x - b.center.x
+            case .right: dx = reference.maxX - b.maxX
+            case .top: dy = reference.maxY - b.maxY
+            case .centreY: dy = reference.center.y - b.center.y
+            case .bottom: dy = reference.minY - b.minY
+            }
+            if abs(dx) > 1e-9 || abs(dy) > 1e-9 { moves[o.id] = .translation(dx, dy) }
+        }
+        apply(moves, actionName: "Align")
+    }
+
+    /// Spaces three or more objects so the gaps between them are equal, keeping the outer two in place.
+    func distribute(horizontally: Bool) {
+        let items = selectedObjects.filter { isEditable($0) }.compactMap { o in objectBounds(o).map { (o, $0) } }
+        guard items.count >= 3 else { return }
+        let sorted = items.sorted { horizontally ? $0.1.minX < $1.1.minX : $0.1.minY < $1.1.minY }
+        let start = horizontally ? sorted.first!.1.minX : sorted.first!.1.minY
+        let end = horizontally ? sorted.map { $0.1.maxX }.max()! : sorted.map { $0.1.maxY }.max()!
+        let total = sorted.reduce(0.0) { $0 + (horizontally ? $1.1.width : $1.1.height) }
+        let gap = (end - start - total) / Double(sorted.count - 1)
+        var cursor = start
+        var moves: [UUID: Affine] = [:]
+        for (o, b) in sorted {
+            let current = horizontally ? b.minX : b.minY
+            let d = cursor - current
+            if abs(d) > 1e-9 { moves[o.id] = horizontally ? .translation(d, 0) : .translation(0, d) }
+            cursor += (horizontally ? b.width : b.height) + gap
+        }
+        apply(moves, actionName: "Distribute")
+    }
+
+    private func apply(_ moves: [UUID: Affine], actionName: String) {
+        guard !moves.isEmpty else { return }
+        mutate(actionName) { doc in
+            for i in doc.objects.indices {
+                if let m = moves[doc.objects[i].id] { doc.objects[i] = Geometry.transform(doc.objects[i], by: m) }
+            }
+        }
+    }
+
     func groupSelection() {
         let ids = selection
         guard ids.count >= 2 else { return }
