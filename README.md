@@ -56,7 +56,7 @@ swift run tsdconv --format svg -o ~/Desktop/out ~/Downloads/  # whole folder
   2D Design does by default), **Step Lock** (snaps to every millimetre) and no lock (⌘L
   cycles too); the right one toggles snapping to objects and the page. Both are in the
   View menu as well, with **Haptic Feedback When Snapping**.
-- **Grid**: 10 mm by default, shown with **View > Show Grid** (⌘'). Spacing comes from the
+- **Grid**: fine black dots, 10 mm apart by default, shown with **View > Show Grid** (⌘'). Spacing comes from the
   **Grid Spacing** submenu (or **Other…** for any value), with optional heavier major
   lines every few lines.
 - **Align**: the align button in the toolbar, **Object > Align**, or the row in the

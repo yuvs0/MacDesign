@@ -291,37 +291,42 @@ final class DrawingCanvas: NSView {
         drag = .editPoint(objectID: objectID, part: part, path: newPath, original: original, moved: true)
     }
 
-    /// Minor lines every grid spacing, stronger major lines; whichever are too dense at
-    /// this zoom are left out. Lines start from the page's bottom-left corner.
+    /// 2D Design's grid: fine black dots at every intersection, slightly larger at major
+    /// ones. Dots that would be too dense at this zoom are left out. Measured from the
+    /// page's bottom-left corner.
     private func drawGrid(in ctx: CGContext, state s: EditorState, pageRect: CGRect) {
         let spacing = GridPrefs.spacing
-        let major = spacing * Double(GridPrefs.majorEvery)
+        let majorEvery = GridPrefs.majorEvery
         let minPx = 6.0
+        // Step up to a coarser multiple until the dots are at least 6 px apart.
+        var step = spacing
+        var multiple = 1
+        while step * Double(s.zoom) < minPx { step *= 2; multiple *= 2 }
+        let page = s.doc.pageSize
+        let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         ctx.saveGState()
         ctx.clip(to: pageRect)
-        ctx.setLineWidth(1)
-        func lines(every step: Double, color: CGColor) {
-            guard step * Double(s.zoom) >= minPx else { return }
-            ctx.setStrokeColor(color)
-            let page = s.doc.pageSize
-            var x = 0.0
-            while x <= page.width + 1e-9 {
-                let vx = (s.toView(TSDPoint(x: x, y: 0)).x).rounded() + 0.5
-                ctx.move(to: CGPoint(x: vx, y: pageRect.minY)); ctx.addLine(to: CGPoint(x: vx, y: pageRect.maxY))
-                x += step
-            }
+        ctx.setFillColor(CGColor(gray: dark ? 0.1 : 0, alpha: 0.55))
+        var minor = CGMutablePath(), major = CGMutablePath()
+        var ix = 0
+        var x = 0.0
+        while x <= page.width + 1e-9 {
+            var iy = 0
             var y = 0.0
             while y <= page.height + 1e-9 {
-                let vy = (s.toView(TSDPoint(x: 0, y: y)).y).rounded() + 0.5
-                ctx.move(to: CGPoint(x: pageRect.minX, y: vy)); ctx.addLine(to: CGPoint(x: pageRect.maxX, y: vy))
-                y += step
+                let v = s.toView(TSDPoint(x: x, y: y))
+                let isMajor = majorEvery > 1 && (ix * multiple) % majorEvery == 0 && (iy * multiple) % majorEvery == 0
+                let r: CGFloat = isMajor ? 1.5 : 0.9
+                (isMajor ? major : minor).addEllipse(in: CGRect(x: v.x.rounded() - r, y: v.y.rounded() - r, width: 2 * r, height: 2 * r))
+                y += step; iy += 1
             }
-            ctx.strokePath()
+            x += step; ix += 1
         }
-        if GridPrefs.majorEvery > 1 {
-            lines(every: spacing, color: CGColor(srgbRed: 0.25, green: 0.5, blue: 1, alpha: 0.10))
-        }
-        lines(every: major, color: CGColor(srgbRed: 0.25, green: 0.5, blue: 1, alpha: 0.24))
+        ctx.addPath(minor)
+        ctx.fillPath()
+        ctx.setFillColor(CGColor(gray: dark ? 0.1 : 0, alpha: 0.8))
+        ctx.addPath(major)
+        ctx.fillPath()
         ctx.restoreGState()
     }
 

@@ -30,6 +30,7 @@ struct LayersPanel: View {
                 }
             }
             .listStyle(.inset)
+            .scrollContentBackground(.hidden)
             .environment(\.defaultMinListRowHeight, 24)
 
             Divider()
