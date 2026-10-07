@@ -24,11 +24,17 @@ struct EditorView: View {
                 .zIndex(1)
             VStack {
                 Spacer()
+                if let msg = state.statusMessage {
+                    Toast(message: msg)
+                        .padding(.bottom, 64)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+            }
+            .animation(.easeInOut(duration: 0.3), value: state.statusMessage)
+            .frame(maxWidth: .infinity)
+            VStack {
+                Spacer()
                 HStack {
-                    if let msg = state.statusMessage {
-                        Text(msg).font(.caption.monospaced()).padding(8).glassEffect(.regular, in: .capsule).padding(12)
-                            .allowsHitTesting(false)
-                    }
                     Spacer()
                     GlassEffectContainer(spacing: 10) {
                         HStack(spacing: 10) {
@@ -188,6 +194,20 @@ struct ZoomReadout: View {
     }
 }
 
+/// A short message that fades in at the bottom of the canvas and fades out by itself.
+struct Toast: View {
+    let message: String
+
+    var body: some View {
+        Text(message)
+            .font(.callout)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .glassEffect(.regular, in: .capsule)
+            .allowsHitTesting(false)
+    }
+}
+
 struct ReadOnlyBanner: View {
     let reason: String?
 
@@ -281,7 +301,7 @@ struct ObjectMenuItems: View {
             .keyboardShortcut("e", modifiers: .command)
             .disabled(state.selection.isEmpty)
         Button("Fillet Corners…") { state.requestFillet() }
-            .keyboardShortcut("r", modifiers: .command)
+            .keyboardShortcut("f", modifiers: .command)
             .disabled(state.selection.isEmpty)
         Divider()
         Button("Bring to Front") { state.arrange(.front) }

@@ -62,7 +62,7 @@ swift run tsdconv --format svg -o ~/Desktop/out ~/Downloads/  # whole folder
 - **Align**: the align button in the toolbar, **Object > Align**, or the row in the
   inspector. One selected object aligns to the page; several align to each other. With
   three or more, distribute spaces them evenly.
-- **Fillet Corners…** (⌘R, Object menu): rounds corners. Select two touching lines,
+- **Fillet Corners…** (⌘F, Object menu): rounds corners. Select two touching lines,
   arcs or paths to join them and round the join, or one path to round every corner (or
   just the anchors picked with the Direct Selection tool). Tangential and collinear joins
   are refused. **Settings** chooses between a plain arc (G1) and smooth corners with

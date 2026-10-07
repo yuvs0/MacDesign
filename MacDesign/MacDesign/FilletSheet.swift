@@ -22,39 +22,32 @@ enum FilletPrefs {
     }
 }
 
-/// Asks for the fillet radius before rounding the selected corners.
+/// Asks for the fillet style and radius before rounding the selected corners.
 struct FilletSheet: View {
     @ObservedObject var state: EditorState
     @Environment(\.dismiss) private var dismiss
     @AppStorage(FilletPrefs.radiusKey) private var radius = 5.0
     @AppStorage(FilletPrefs.smoothKey) private var smooth = false
     @AppStorage(FilletPrefs.smoothingKey) private var smoothing = 0.6
-    @FocusState private var radiusFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(spacing: 18) {
             Text("Fillet Corners").font(.headline)
             Text(state.filletDescription)
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            HStack(spacing: 16) {
+                OptionCard(title: "Arc", caption: "A circular arc, tangent to both sides (G1).",
+                           selected: !smooth) { smooth = false } content: { FilletThumbnail(style: .arc) }
+                OptionCard(title: "Smooth", caption: "Curvature eases in, like Apple's shapes. \(Int((smoothing * 100).rounded()))% in Settings.",
+                           selected: smooth) { smooth = true } content: { FilletThumbnail(style: .smooth(smoothing)) }
+            }
             HStack {
                 Text("Radius")
-                Spacer()
                 TextField("", value: $radius, format: .number)
                     .frame(width: 70)
                     .multilineTextAlignment(.trailing)
-                    .focused($radiusFocused)
                 Text("mm").foregroundStyle(.secondary)
-            }
-            Picker("Style", selection: $smooth) {
-                Text("Arc (G1)").tag(false)
-                Text("Smooth \(Int((smoothing * 100).rounded()))%").tag(true)
-            }
-            .pickerStyle(.segmented)
-            Text("The style and smoothing can be changed in Settings.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-            HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
@@ -68,8 +61,33 @@ struct FilletSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 340)
-        .onAppear { radiusFocused = true }
+        .frame(width: 520)
+    }
+}
+
+/// A rounded right angle in the given style, with the sharp corner it replaces shown faintly.
+struct FilletThumbnail: View {
+    let style: FilletStyle
+
+    var body: some View {
+        Canvas { ctx, size in
+            let corner = PathData(segments: [.move(TSDPoint(x: 0, y: 0)), .line(TSDPoint(x: 80, y: 0)), .line(TSDPoint(x: 80, y: 80))], isClosed: false)
+            let filleted = Fillet.apply(to: corner, corners: nil, radius: 32, style: style).path
+            let ox = size.width / 2 - 40, oy = size.height / 2 + 40
+            func pt(_ p: TSDPoint) -> CGPoint { CGPoint(x: ox + p.x, y: oy - p.y) }
+            var sharp = Path()
+            sharp.move(to: pt(TSDPoint(x: 40, y: 0))); sharp.addLine(to: pt(TSDPoint(x: 80, y: 0))); sharp.addLine(to: pt(TSDPoint(x: 80, y: 40)))
+            ctx.stroke(sharp, with: .color(.secondary.opacity(0.4)), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+            var path = Path()
+            for seg in filleted.segments {
+                switch seg {
+                case .move(let p): path.move(to: pt(p))
+                case .line(let p): path.addLine(to: pt(p))
+                case .curve(let c1, let c2, let e): path.addCurve(to: pt(e), control1: pt(c1), control2: pt(c2))
+                }
+            }
+            ctx.stroke(path, with: .color(.primary), lineWidth: 2.5)
+        }
     }
 }
 
@@ -105,8 +123,8 @@ struct SettingsView: View {
                         .multilineTextAlignment(.trailing)
                     Text("mm").foregroundStyle(.secondary)
                 }
-                FilletPreview(style: smooth ? .smooth(smoothing) : .arc)
-                    .frame(height: 90)
+                FilletThumbnail(style: smooth ? .smooth(smoothing) : .arc)
+                    .frame(height: 110)
             }
         }
         .formStyle(.grouped)
@@ -114,29 +132,3 @@ struct SettingsView: View {
     }
 }
 
-/// A right angle rounded with the chosen style, for the Settings window.
-private struct FilletPreview: View {
-    let style: FilletStyle
-
-    var body: some View {
-        Canvas { ctx, size in
-            let corner = PathData(segments: [.move(TSDPoint(x: 0, y: 0)), .line(TSDPoint(x: 60, y: 0)), .line(TSDPoint(x: 60, y: 60))], isClosed: false)
-            let filleted = Fillet.apply(to: corner, corners: nil, radius: 24, style: style).path
-            var path = Path()
-            let ox = size.width / 2 - 30, oy = size.height - 12
-            func pt(_ p: TSDPoint) -> CGPoint { CGPoint(x: ox + p.x, y: oy - p.y) }
-            for seg in filleted.segments {
-                switch seg {
-                case .move(let p): path.move(to: pt(p))
-                case .line(let p): path.addLine(to: pt(p))
-                case .curve(let c1, let c2, let e): path.addCurve(to: pt(e), control1: pt(c1), control2: pt(c2))
-                }
-            }
-            ctx.stroke(path, with: .color(.primary), lineWidth: 2)
-            // The sharp corner it replaced, faintly.
-            var sharp = Path()
-            sharp.move(to: pt(TSDPoint(x: 36, y: 0))); sharp.addLine(to: pt(TSDPoint(x: 60, y: 0))); sharp.addLine(to: pt(TSDPoint(x: 60, y: 24)))
-            ctx.stroke(sharp, with: .color(.secondary.opacity(0.4)), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
-        }
-    }
-}

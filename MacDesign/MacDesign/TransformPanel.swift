@@ -63,7 +63,8 @@ struct TransformPanel: View {
             TextField("", value: Binding(get: { (value * 100).rounded() / 100 }, set: set), format: .number)
                 .textFieldStyle(.roundedBorder)
                 .multilineTextAlignment(.trailing)
-                .frame(width: 64)
+                .frame(width: 68)
+                .fixedSize()
         }
     }
 
