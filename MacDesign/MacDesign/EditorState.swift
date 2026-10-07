@@ -424,17 +424,25 @@ final class EditorState: ObservableObject {
         selectedAnchors = []
     }
 
-    /// Splits each selected object one level: groups into members, paths into their
-    /// separate runs, and a single run into its segments.
-    func explode() {
+    /// Set to show the Explode chooser (one level or fully).
+    @Published var explodeRequest = false
+
+    func requestExplode() {
+        guard selectedObjects.contains(where: { isEditable($0) && !PathOps.isPrimitive($0) }) else { NSSound.beep(); return }
+        explodeRequest = true
+    }
+
+    /// Splits each selected object. One level: groups into members, paths into their
+    /// separate runs, a single run into its segments. Fully: down to primitives.
+    func explode(fully: Bool) {
         let ids = selection
         guard !ids.isEmpty else { return }
         var newIDs: Set<UUID> = []
-        mutate("Explode") { doc in
+        mutate(fully ? "Explode Fully" : "Explode") { doc in
             var result: [DesignObject] = []
             for o in doc.objects {
                 if ids.contains(o.id), isEditable(o) {
-                    let parts = PathOps.explode(o)
+                    let parts = fully ? PathOps.explodeFully(o) : PathOps.explode(o)
                     result.append(contentsOf: parts)
                     newIDs.formUnion(parts.map { $0.id })
                 } else {

@@ -112,8 +112,27 @@ public enum PathOps {
         }
     }
 
+    /// True for things Explode leaves alone: lines, native circles and arcs, text, points,
+    /// and a path that is a single segment.
+    public static func isPrimitive(_ object: DesignObject) -> Bool {
+        switch object.shape {
+        case .line, .circle, .arc, .text, .point: return true
+        case .group: return false
+        case .path(let p): return p.segments.count <= 2
+        default: return false
+        }
+    }
+
+    /// Explode fully: keeps splitting until only primitives remain.
+    public static func explodeFully(_ object: DesignObject) -> [DesignObject] {
+        if isPrimitive(object) { return [object] }
+        let parts = explode(object)
+        if parts.count == 1, parts[0].shape == object.shape { return parts }
+        return parts.flatMap { explodeFully($0) }
+    }
+
     /// Explode, one level: a group becomes its members; a path with several runs becomes one
-    /// object per run; a single run becomes one object per segment. Lines and points stay.
+    /// object per run; a single run becomes one object per segment. Primitives stay.
     public static func explode(_ object: DesignObject) -> [DesignObject] {
         func part(_ path: PathData) -> DesignObject {
             var o = object
@@ -134,7 +153,7 @@ public enum PathOps {
         switch object.shape {
         case .group(let kids):
             return kids.map { k in var c = k; c.layer = object.layer; c.fileID = 0; return c }
-        case .text, .point, .line:
+        case .text, .point, .line, .circle, .arc:
             return [object]
         default:
             let runs = chains(of: object)

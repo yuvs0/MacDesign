@@ -249,3 +249,16 @@ final class PathOpsTests: XCTestCase {
         XCTAssertEqual(r.segments, [.curve(TSDPoint(x: 3, y: 2), TSDPoint(x: 1, y: 2), TSDPoint(x: 0, y: 0))])
     }
 }
+
+extension PathOpsTests {
+    func testExplodeFullyReachesPrimitives() {
+        let rect = DesignObject(shape: .rect(TSDRect(minX: 0, minY: 0, maxX: 10, maxY: 5)))
+        let circle = DesignObject(shape: .circle(center: .zero, radius: 3))
+        let group = DesignObject(shape: .group([DesignObject(shape: .group([rect, circle]))]))
+        let parts = PathOps.explodeFully(group)
+        XCTAssertEqual(parts.count, 5)
+        XCTAssertTrue(parts.allSatisfy { PathOps.isPrimitive($0) })
+        XCTAssertEqual(parts.filter { if case .line = $0.shape { return true } else { return false } }.count, 4)
+        XCTAssertEqual(PathOps.explode(circle).count, 1)
+    }
+}

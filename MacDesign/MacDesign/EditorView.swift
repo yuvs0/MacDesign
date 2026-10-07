@@ -48,6 +48,7 @@ struct EditorView: View {
                 .inspectorColumnWidth(min: 240, ideal: 280, max: 360)
         }
         .toolbar { EditorToolbar(state: state, document: document, fileURL: fileURL) }
+        .sheet(isPresented: $state.explodeRequest) { ExplodeSheet(state: state) }
         .focusedSceneValue(\.editorState, state)
         .onAppear { state.undoManager = undoManager }
         .frame(minWidth: 900, minHeight: 560)
@@ -72,8 +73,7 @@ struct EditorToolbar: ToolbarContent {
             }
             .help("Export the drawing for other software")
 
-            AlignMenu(state: state)
-                .labelStyle(.iconOnly)
+            ToolbarAlignMenu(state: state)
                 .help("Align or distribute the selected objects")
 
             Button {
@@ -220,7 +220,7 @@ struct EditorCommands: Commands {
             Button("Make Path") { state?.makePath() }
                 .keyboardShortcut("j", modifiers: .command)
                 .disabled(state?.selection.isEmpty ?? true)
-            Button("Explode") { state?.explode() }
+            Button("Explode…") { state?.requestExplode() }
                 .keyboardShortcut("j", modifiers: [.command, .shift])
                 .disabled(state?.selection.isEmpty ?? true)
             Divider()
@@ -278,14 +278,39 @@ struct EditorCommands: Commands {
 }
 
 
-/// Align and distribute items, used in the Object menu and the toolbar.
+/// The toolbar's align menu. Observes the editor so it enables as soon as something is selected.
+struct ToolbarAlignMenu: View {
+    @ObservedObject var state: EditorState
+
+    var body: some View {
+        Menu {
+            AlignMenuItems(state: state)
+        } label: {
+            Label("Align", systemImage: "align.horizontal.left")
+        }
+        .disabled(state.selection.isEmpty)
+    }
+}
+
+/// Align and distribute items, used in the Object menu.
 struct AlignMenu: View {
+    let state: EditorState?
+
+    var body: some View {
+        Menu("Align") {
+            AlignMenuItems(state: state)
+        }
+        .disabled(state?.selection.isEmpty ?? true)
+    }
+}
+
+struct AlignMenuItems: View {
     let state: EditorState?
 
     private var count: Int { state?.selection.count ?? 0 }
 
     var body: some View {
-        Menu("Align") {
+        Group {
             ForEach([EditorState.AlignEdge.left, .centreX, .right], id: \.self) { edge in
                 Button(edge.title, systemImage: edge.systemImage) { state?.align(edge) }
             }
@@ -303,6 +328,5 @@ struct AlignMenu: View {
                 Text("One object aligns to the page")
             }
         }
-        .disabled(count == 0)
     }
 }
