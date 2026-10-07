@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		54131E543076A4BF008DD938 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 54131E533076A4BF008DD938 /* AppIcon.icon */; };
+		54131E553076A4BF008DD938 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 54131E533076A4BF008DD938 /* AppIcon.icon */; };
+		54131E563076A4BF008DD938 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 54131E533076A4BF008DD938 /* AppIcon.icon */; };
 		AA0000000000000000000001 /* TSDKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000002 /* TSDKit */; };
 		BB00000000000000000007 /* TSDKit in Frameworks */ = {isa = PBXBuildFile; productRef = BB00000000000000000008 /* TSDKit */; };
 		BB00000000000000000012 /* QuickLookThumbnail.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BB00000000000000000002 /* QuickLookThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -14,8 +17,39 @@
 		CC00000000000000000012 /* QuickLookPreview.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CC00000000000000000002 /* QuickLookPreview.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		BB00000000000000000014 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BB00000000000000000001;
+			remoteInfo = QuickLookThumbnail;
+		};
+		CC00000000000000000014 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CC00000000000000000001;
+			remoteInfo = QuickLookPreview;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		DD00000000000000000001 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = "";
+			dstSubfolder = PlugIns;
+			files = (
+				BB00000000000000000012 /* QuickLookThumbnail.appex in Embed Foundation Extensions */,
+				CC00000000000000000012 /* QuickLookPreview.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* MacDesign.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacDesign.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		54131E533076A4BF008DD938 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		BB00000000000000000002 /* QuickLookThumbnail.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = QuickLookThumbnail.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CC00000000000000000002 /* QuickLookPreview.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = QuickLookPreview.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -47,19 +81,15 @@
 		};
 		BB00000000000000000005 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
 				BB00000000000000000007 /* TSDKit in Frameworks */,
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 		CC00000000000000000005 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
 				CC00000000000000000007 /* TSDKit in Frameworks */,
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
@@ -70,6 +100,7 @@
 				000000000000000000000010 /* MacDesign */,
 				BB00000000000000000003 /* QuickLookThumbnail */,
 				CC00000000000000000003 /* QuickLookPreview */,
+				54131E533076A4BF008DD938 /* AppIcon.icon */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -123,8 +154,6 @@
 			);
 			buildRules = (
 			);
-			dependencies = (
-			);
 			fileSystemSynchronizedGroups = (
 				BB00000000000000000003 /* QuickLookThumbnail */,
 			);
@@ -145,8 +174,6 @@
 				CC00000000000000000006 /* Resources */,
 			);
 			buildRules = (
-			);
-			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
 				CC00000000000000000003 /* QuickLookPreview */,
@@ -202,21 +229,20 @@
 		000000000000000140000000 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
+				54131E553076A4BF008DD938 /* AppIcon.icon in Resources */,
 			);
 		};
 		BB00000000000000000006 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
+				54131E563076A4BF008DD938 /* AppIcon.icon in Resources */,
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 		CC00000000000000000006 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
+				54131E543076A4BF008DD938 /* AppIcon.icon in Resources */,
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
@@ -228,17 +254,13 @@
 		};
 		BB00000000000000000004 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 		CC00000000000000000004 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
 			files = (
 			);
-			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
@@ -254,38 +276,6 @@
 			targetProxy = CC00000000000000000014 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
-
-/* Begin PBXContainerItemProxy section */
-		BB00000000000000000014 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 000000000000000000000000 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = BB00000000000000000001;
-			remoteInfo = QuickLookThumbnail;
-		};
-		CC00000000000000000014 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 000000000000000000000000 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = CC00000000000000000001;
-			remoteInfo = QuickLookPreview;
-		};
-/* End PBXContainerItemProxy section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		DD00000000000000000001 /* Embed Foundation Extensions */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 13;
-			files = (
-				BB00000000000000000012 /* QuickLookThumbnail.appex in Embed Foundation Extensions */,
-				CC00000000000000000012 /* QuickLookPreview.appex in Embed Foundation Extensions */,
-			);
-			name = "Embed Foundation Extensions";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
 		000000000000000011000000 /* Debug configuration for PBXProject "MacDesign" */ = {
@@ -423,6 +413,7 @@
 		000000000000000111000000 /* Debug configuration for PBXNativeTarget "MacDesign" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = H5W43R3LCU;
@@ -453,6 +444,7 @@
 		000000000000000112000000 /* Release configuration for PBXNativeTarget "MacDesign" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = H5W43R3LCU;
@@ -489,7 +481,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = QuickLookThumbnail-Info.plist;
+				INFOPLIST_FILE = "QuickLookThumbnail-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "MacDesign Thumbnails";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -517,7 +509,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = QuickLookThumbnail-Info.plist;
+				INFOPLIST_FILE = "QuickLookThumbnail-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "MacDesign Thumbnails";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -545,7 +537,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = QuickLookPreview-Info.plist;
+				INFOPLIST_FILE = "QuickLookPreview-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "MacDesign Preview";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -573,7 +565,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = QuickLookPreview-Info.plist;
+				INFOPLIST_FILE = "QuickLookPreview-Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "MacDesign Preview";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -614,19 +606,17 @@
 		BB00000000000000000009 /* Build configuration list for PBXNativeTarget "QuickLookThumbnail" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				BB00000000000000000010 /* Debug */,
-				BB00000000000000000011 /* Release */,
+				BB00000000000000000010 /* Debug configuration for PBXNativeTarget "QuickLookThumbnail" */,
+				BB00000000000000000011 /* Release configuration for PBXNativeTarget "QuickLookThumbnail" */,
 			);
-			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 		CC00000000000000000009 /* Build configuration list for PBXNativeTarget "QuickLookPreview" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				CC00000000000000000010 /* Debug */,
-				CC00000000000000000011 /* Release */,
+				CC00000000000000000010 /* Debug configuration for PBXNativeTarget "QuickLookPreview" */,
+				CC00000000000000000011 /* Release configuration for PBXNativeTarget "QuickLookPreview" */,
 			);
-			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */

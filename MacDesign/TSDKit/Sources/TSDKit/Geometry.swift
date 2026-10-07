@@ -203,7 +203,7 @@ public enum Geometry {
         return .path(p)
     }
 
-    static func near(_ a: TSDPoint, _ b: TSDPoint, _ tol: Double = 1e-6) -> Bool {
+    public static func near(_ a: TSDPoint, _ b: TSDPoint, _ tol: Double = 1e-6) -> Bool {
         abs(a.x - b.x) < tol && abs(a.y - b.y) < tol
     }
 

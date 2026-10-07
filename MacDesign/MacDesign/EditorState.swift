@@ -4,13 +4,14 @@ import AppKit
 import TSDKit
 
 enum Tool: String, CaseIterable, Identifiable {
-    case select, rectangle, ellipse, line, arc, pen, text
+    case select, directSelect, rectangle, ellipse, line, arc, pen, text
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .select: return "Select"
+        case .directSelect: return "Direct Selection"
         case .rectangle: return "Rectangle"
         case .ellipse: return "Ellipse"
         case .line: return "Line"
@@ -23,6 +24,7 @@ enum Tool: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .select: return "arrow.up.left"
+        case .directSelect: return "cursorarrow"
         case .rectangle: return "rectangle"
         case .ellipse: return "circle"
         case .line: return "line.diagonal"
@@ -35,10 +37,11 @@ enum Tool: String, CaseIterable, Identifiable {
     var shortcut: Character {
         switch self {
         case .select: return "v"
+        case .directSelect: return "a"
         case .rectangle: return "r"
         case .ellipse: return "e"
         case .line: return "l"
-        case .arc: return "a"
+        case .arc: return "c"
         case .pen: return "p"
         case .text: return "t"
         }
@@ -223,6 +226,51 @@ final class EditorState: ObservableObject {
     func setLineType(_ t: LineType) {
         if selection.isEmpty { newShapeStyle.lineType = t; return }
         updateSelected("Change Line") { $0.style.lineType = t }
+    }
+
+    func setStrokeEnabled(_ on: Bool) {
+        setLineType(on ? .solid : .none)
+    }
+
+    /// Replaces the whole fill (used to turn hatch, gradient and pattern fills off and on).
+    func setFill(_ fill: Fill) {
+        if selection.isEmpty { newShapeStyle.fill = fill; return }
+        updateSelected("Change Fill") { o in
+            o.style.fill = fill
+            if case .group(var kids) = o.shape {
+                for i in kids.indices { kids[i].style.fill = fill }
+                o.shape = .group(kids)
+            }
+        }
+    }
+
+    /// Style shown in the inspector: the single selected object's, the first selected, or the defaults.
+    var inspectedStyle: Style {
+        selectedObjects.first?.style ?? newShapeStyle
+    }
+
+    // MARK: Direct selection (point editing)
+
+    /// Indices of the selected anchors of the direct-selection target (segment indices).
+    @Published var selectedAnchors: Set<Int> = []
+
+    /// Deletes the selected anchors from the selected path, keeping at least two points.
+    func deleteSelectedAnchors() {
+        guard selection.count == 1, let o = selectedObjects.first, !selectedAnchors.isEmpty,
+              let path = PathEditing.editablePath(o.shape) else { return }
+        var segs = path.segments
+        let remove = selectedAnchors.sorted(by: >)
+        for i in remove where i < segs.count { segs.remove(at: i) }
+        guard segs.count >= 2 else { return }
+        if case .move = segs[0] {} else { segs[0] = .move(segs[0].endPoint) }
+        let id = o.id
+        selectedAnchors = []
+        mutate("Delete Points") { doc in
+            if let i = doc.objects.firstIndex(where: { $0.id == id }) {
+                doc.objects[i].shape = .path(PathData(segments: segs, isClosed: path.isClosed))
+                doc.objects[i].recordType = nil
+            }
+        }
     }
 
     func moveSelection(toLayer index: Int) {

@@ -67,12 +67,15 @@ struct PropertiesPanel: View {
 
     private var defaultsSection: some View {
         Section("New Shapes") {
-            colorRow("Stroke", color: state.newShapeStyle.strokeColor ?? .black) { state.newShapeStyle.strokeColor = $0 }
-            fillRow(fill: state.newShapeStyle.fillColor) { state.newShapeStyle.fillColor = $0 }
+            strokeRows
+            fillRows
             Picker("Layer", selection: $state.activeLayer) {
                 ForEach(document.doc.layers) { Text($0.name).tag($0.index) }
             }
-            TextField("Font", text: $state.newTextFace)
+            Picker("Font", selection: $state.newTextFace) {
+                if !fontFamilies.contains(state.newTextFace) { Text(state.newTextFace).tag(state.newTextFace) }
+                ForEach(fontFamilies, id: \.self) { Text($0).tag($0) }
+            }
             HStack {
                 Text("Text height")
                 Spacer()
@@ -138,36 +141,80 @@ struct PropertiesPanel: View {
 
     private var appearanceSection: some View {
         Section("Appearance") {
-            colorRow("Stroke", color: single?.style.strokeColor ?? selected.first?.style.strokeColor ?? .black) { state.setStroke($0) }
-            HStack(spacing: 6) {
-                ForEach(swatches, id: \.hex) { c in
-                    Button { state.setStroke(c) } label: {
-                        Circle().fill(c.color).frame(width: 16, height: 16)
-                            .overlay(Circle().strokeBorder(Color.primary.opacity(0.25), lineWidth: 0.5))
-                    }
-                    .buttonStyle(.plain)
-                    .help(c.hex)
+            strokeRows
+            fillRows
+        }
+    }
+
+    /// Stroke on/off, colour, fine or thick (2D Design's two kinds), width and line pattern.
+    /// With nothing selected these edit the defaults for new shapes.
+    private var strokeRows: some View {
+        let style = state.inspectedStyle
+        let isFine = style.strokeWidth <= 0
+        return Group {
+            HStack {
+                Toggle("Stroke", isOn: Binding(get: { style.isStroked }, set: { state.setStrokeEnabled($0) }))
+                Spacer()
+                if style.isStroked {
+                    ColorPicker("", selection: Binding(get: { style.effectiveStroke.color },
+                                                       set: { c in if let rgb = RGB(c) { state.setStroke(rgb) } }), supportsOpacity: false)
+                        .labelsHidden()
                 }
             }
-            fillRow(fill: single?.style.fillColor ?? selected.first?.style.fillColor) { state.setFill($0) }
-            if let fill = (single ?? selected.first)?.style.fill, fill.isPreservedKind {
-                LabeledContent("Fill type", value: fill.name)
+            if style.isStroked {
+                HStack(spacing: 6) {
+                    ForEach(swatches, id: \.hex) { c in
+                        Button { state.setStroke(c) } label: {
+                            Circle().fill(c.color).frame(width: 16, height: 16)
+                                .overlay(Circle().strokeBorder(Color.primary.opacity(0.25), lineWidth: 0.5))
+                        }
+                        .buttonStyle(.plain)
+                        .help(c.hex)
+                    }
+                }
+                Picker("Thickness", selection: Binding(get: { isFine ? 0 : 1 },
+                                                       set: { state.setStrokeWidth($0 == 0 ? 0 : max(style.strokeWidth, 0.5)) })) {
+                    Text("Fine").tag(0)
+                    Text("Thick").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .help("Fine lines have no thickness: a plotter or laser follows the path. Thick lines have a printed width.")
+                if !isFine {
+                    HStack {
+                        Text("Width")
+                        Spacer()
+                        TextField("", value: Binding(get: { style.strokeWidth }, set: { state.setStrokeWidth(max(0.05, $0)) }), format: .number)
+                            .frame(width: 60)
+                            .multilineTextAlignment(.trailing)
+                        Text("mm").foregroundStyle(.secondary)
+                    }
+                }
+                Picker("Pattern", selection: Binding(get: { style.lineType }, set: { state.setLineType($0) })) {
+                    ForEach(LineType.allCases.filter { $0 != .none }, id: \.self) { Text($0.name).tag($0) }
+                }
+            }
+        }
+    }
+
+    /// Fill on/off and colour. Hatch, gradient, texture and pattern fills from a file are kept
+    /// while the toggle is on; switching off and on again, or picking a colour, makes them solid.
+    private var fillRows: some View {
+        let style = state.inspectedStyle
+        return Group {
+            HStack {
+                Toggle("Fill", isOn: Binding(get: { style.isFilled },
+                                             set: { on in state.setFill(on ? .solid(style.fill.representativeColor ?? RGB(r: 220, g: 220, b: 220)) : .none) }))
+                Spacer()
+                if style.isFilled {
+                    ColorPicker("", selection: Binding(get: { (style.fill.representativeColor ?? .white).color },
+                                                       set: { c in if let rgb = RGB(c) { state.setFill(rgb) } }), supportsOpacity: false)
+                        .labelsHidden()
+                }
+            }
+            if style.fill.isPreservedKind {
+                LabeledContent("Fill type", value: style.fill.name)
                     .help("Kept as it was in the file. Choosing a fill colour replaces it.")
             }
-            Picker("Line", selection: Binding(get: { (single ?? selected.first)?.style.lineType ?? .solid },
-                                              set: { state.setLineType($0) })) {
-                ForEach(LineType.allCases, id: \.self) { Text($0.name).tag($0) }
-            }
-            HStack {
-                Text("Stroke width")
-                Spacer()
-                TextField("", value: Binding(get: { single?.style.strokeWidth ?? selected.first?.style.strokeWidth ?? 0.25 },
-                                             set: { state.setStrokeWidth($0) }), format: .number)
-                    .frame(width: 60)
-                    .multilineTextAlignment(.trailing)
-                Text("mm").foregroundStyle(.secondary)
-            }
-            .help("0 is a hairline.")
         }
     }
 
@@ -243,24 +290,6 @@ struct PropertiesPanel: View {
     }
 
     // Rows
-
-    private func colorRow(_ title: String, color: RGB, set: @escaping (RGB) -> Void) -> some View {
-        ColorPicker(title, selection: Binding(
-            get: { color.color },
-            set: { c in if let rgb = RGB(c) { set(rgb) } }
-        ), supportsOpacity: false)
-    }
-
-    private func fillRow(fill: RGB?, set: @escaping (RGB?) -> Void) -> some View {
-        HStack {
-            Toggle("Fill", isOn: Binding(get: { fill != nil }, set: { on in set(on ? (fill ?? RGB(r: 220, g: 220, b: 220)) : nil) }))
-            Spacer()
-            if let f = fill {
-                ColorPicker("", selection: Binding(get: { f.color }, set: { c in if let rgb = RGB(c) { set(rgb) } }), supportsOpacity: false)
-                    .labelsHidden()
-            }
-        }
-    }
 
     private func numberRow(_ title: String, value: Double, set: @escaping (Double) -> Void) -> some View {
         HStack {

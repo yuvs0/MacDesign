@@ -41,6 +41,8 @@ final class DrawingCanvas: NSView {
         case scale(handle: Int, bounds: TSDRect, current: TSDPoint)
         case create(start: TSDPoint, current: TSDPoint, shift: Bool)
         case penDrag(anchor: TSDPoint, current: TSDPoint)
+        /// Direct selection: moving an anchor or handle of the selected path.
+        case editPoint(objectID: UUID, part: PathEditing.Part, path: PathData, original: TSDKit.Shape, moved: Bool)
     }
 
     private var drag: Drag = .none
@@ -126,7 +128,7 @@ final class DrawingCanvas: NSView {
     override func resetCursorRects() {
         guard let s = state else { return }
         switch s.tool {
-        case .select: addCursorRect(bounds, cursor: .arrow)
+        case .select, .directSelect: addCursorRect(bounds, cursor: .arrow)
         case .text: addCursorRect(bounds, cursor: .iBeam)
         default: addCursorRect(bounds, cursor: .crosshair)
         }
@@ -166,6 +168,10 @@ final class DrawingCanvas: NSView {
         for o in doc.objects {
             if let m = live, s.selection.contains(o.id) {
                 Renderer.draw(Geometry.transform(o, by: m), in: ctx, doc: doc, options: options)
+            } else if case .editPoint(let id, _, let path, let original, true) = drag, o.id == id {
+                var edited = o
+                edited.shape = PathEditing.shape(after: path, original: original)
+                Renderer.draw(edited, in: ctx, doc: doc, options: options)
             } else {
                 Renderer.draw(o, in: ctx, doc: doc, options: options)
             }
@@ -173,8 +179,116 @@ final class DrawingCanvas: NSView {
         drawPreview(in: ctx, state: s)
         ctx.restoreGState()
 
-        drawSelection(in: ctx, state: s, live: live)
+        if s.tool == .directSelect {
+            drawAnchors(in: ctx, state: s)
+        } else {
+            drawSelection(in: ctx, state: s, live: live)
+        }
         drawGuides(in: ctx, state: s)
+    }
+
+    // MARK: Direct selection
+
+    /// The path being edited: the live one during a drag, else the selected object's.
+    private func directPath(_ s: EditorState) -> (DesignObject, PathData)? {
+        guard s.selection.count == 1, let o = s.selectedObjects.first, s.isEditable(o) else { return nil }
+        if case .editPoint(let id, _, let path, _, _) = drag, id == o.id { return (o, path) }
+        guard let path = PathEditing.editablePath(o.shape) else { return nil }
+        return (o, path)
+    }
+
+    private func drawAnchors(in ctx: CGContext, state s: EditorState) {
+        let accent = NSColor.controlAccentColor.cgColor
+        ctx.setStrokeColor(accent)
+        ctx.setLineWidth(1)
+        // Outline every selected object faintly so the user can see what's selected.
+        for o in s.selectedObjects {
+            guard let b = s.objectBounds(o) else { continue }
+            ctx.setLineDash(phase: 0, lengths: [3, 3])
+            ctx.stroke(viewRect(b).insetBy(dx: -2, dy: -2))
+        }
+        ctx.setLineDash(phase: 0, lengths: [])
+        guard let (_, path) = directPath(s) else { return }
+        // Handles of selected anchors first, so anchors draw over them.
+        for i in s.selectedAnchors {
+            let anchor = s.toView(path.segments[min(i, path.segments.count - 1)].endPoint)
+            let h = PathEditing.handles(path, at: i)
+            for hp in [h.inHandle, h.outHandle].compactMap({ $0 }) {
+                let v = s.toView(hp)
+                ctx.move(to: anchor); ctx.addLine(to: v); ctx.strokePath()
+                ctx.setFillColor(accent)
+                ctx.fillEllipse(in: CGRect(x: v.x - 3.5, y: v.y - 3.5, width: 7, height: 7))
+            }
+        }
+        for (i, p) in PathEditing.anchors(path).enumerated() {
+            let v = s.toView(p)
+            let r = CGRect(x: v.x - 3.5, y: v.y - 3.5, width: 7, height: 7)
+            ctx.setFillColor(s.selectedAnchors.contains(i) ? accent : CGColor(gray: 1, alpha: 1))
+            ctx.fill(r)
+            ctx.stroke(r)
+        }
+    }
+
+    /// The anchor or handle under a view point, handles of selected anchors taking priority.
+    private func directPart(at vp: CGPoint, state s: EditorState) -> PathEditing.Part? {
+        guard let (_, path) = directPath(s) else { return nil }
+        func near(_ p: TSDPoint) -> Bool { let v = s.toView(p); return abs(v.x - vp.x) <= 6 && abs(v.y - vp.y) <= 6 }
+        for i in s.selectedAnchors {
+            let h = PathEditing.handles(path, at: i)
+            if let q = h.outHandle, near(q) { return .outHandle(i) }
+            if let q = h.inHandle, near(q) { return .inHandle(i) }
+        }
+        for (i, p) in PathEditing.anchors(path).enumerated() where near(p) { return .anchor(i) }
+        return nil
+    }
+
+    private func directMouseDown(_ event: NSEvent, viewPoint vp: CGPoint, docPoint p: TSDPoint, state s: EditorState) {
+        let shift = event.modifierFlags.contains(.shift)
+        if let part = directPart(at: vp, state: s), let (o, path) = directPath(s) {
+            if case .anchor(let i) = part {
+                if shift {
+                    if s.selectedAnchors.contains(i) { s.selectedAnchors.remove(i) } else { s.selectedAnchors.insert(i) }
+                } else if !s.selectedAnchors.contains(i) {
+                    s.selectedAnchors = [i]
+                }
+            }
+            beginSnapping(excluding: [o.id], event: event)
+            drag = .editPoint(objectID: o.id, part: part, path: path, original: o.shape, moved: false)
+            return
+        }
+        if let hit = hitTest(p) {
+            if s.selection != [hit.id] { s.selectedAnchors = [] }
+            s.selection = [hit.id]
+            if PathEditing.editablePath(hit.shape) == nil {
+                // Text, groups and points can't be point-edited; move them as a whole instead.
+                beginSnapping(excluding: s.selection, event: event)
+                moveStartBounds = s.selectionBounds
+                drag = .move(start: p, current: p, moved: false)
+            }
+        } else {
+            s.selection = []
+            s.selectedAnchors = []
+            drag = .marquee(start: p, current: p)
+        }
+    }
+
+    /// Moves every selected anchor together when one of them is dragged.
+    private func dragEditPoint(objectID: UUID, part: PathEditing.Part, path: PathData, original: TSDKit.Shape, to p: TSDPoint, event: NSEvent) {
+        guard let s = state else { return }
+        var q = snapped(p, event: event)
+        if event.modifierFlags.contains(.shift), let from = PathEditing.position(of: part, in: path) {
+            if abs(q.x - from.x) > abs(q.y - from.y) { q.y = from.y } else { q.x = from.x }
+        }
+        var newPath = PathEditing.move(part, to: q, in: path)
+        if case .anchor(let i) = part, s.selectedAnchors.count > 1, let from = PathEditing.position(of: part, in: path) {
+            let dx = q.x - from.x, dy = q.y - from.y
+            for j in s.selectedAnchors where j != i {
+                if let a = PathEditing.position(of: .anchor(j), in: path) {
+                    newPath = PathEditing.move(.anchor(j), to: TSDPoint(x: a.x + dx, y: a.y + dy), in: newPath)
+                }
+            }
+        }
+        drag = .editPoint(objectID: objectID, part: part, path: newPath, original: original, moved: true)
     }
 
     /// Minor lines every grid spacing, stronger major lines; whichever are too dense at
@@ -327,7 +441,7 @@ final class DrawingCanvas: NSView {
         }
         if var b = s.selectionBounds {
             if let m = live { b = TSDRect(p1: m.apply(TSDPoint(x: b.minX, y: b.minY)), p2: m.apply(TSDPoint(x: b.maxX, y: b.maxY))) }
-            let r = viewRect(b).insetBy(dx: -3, dy: -3)
+            let r = viewRect(b).insetBy(dx: -handleInset(s), dy: -handleInset(s))
             ctx.setLineDash(phase: 0, lengths: [4, 3])
             ctx.stroke(r)
             ctx.setLineDash(phase: 0, lengths: [])
@@ -405,9 +519,14 @@ final class DrawingCanvas: NSView {
         }
     }
 
+    /// Handles sit further out from text so they don't cover the letters.
+    private func handleInset(_ s: EditorState) -> CGFloat {
+        s.selectedObjects.allSatisfy { if case .text = $0.shape { return true } else { return false } } ? 10 : 3
+    }
+
     private func handleIndex(at viewPoint: CGPoint) -> Int? {
         guard let s = state, let b = s.selectionBounds, s.selectedObjects.allSatisfy({ s.isEditable($0) }) else { return nil }
-        let r = viewRect(b).insetBy(dx: -3, dy: -3)
+        let r = viewRect(b).insetBy(dx: -handleInset(s), dy: -handleInset(s))
         for (i, h) in handlePoints(r).enumerated() where abs(h.x - viewPoint.x) <= 6 && abs(h.y - viewPoint.y) <= 6 {
             return i
         }
@@ -430,6 +549,8 @@ final class DrawingCanvas: NSView {
         let isDouble = event.clickCount >= 2
 
         switch s.tool {
+        case .directSelect:
+            directMouseDown(event, viewPoint: vp, docPoint: p, state: s)
         case .select:
             if let h = handleIndex(at: vp), let b = s.selectionBounds {
                 beginSnapping(excluding: s.selection, event: event)
@@ -513,6 +634,11 @@ final class DrawingCanvas: NSView {
         case .scale(let h, let b, _): drag = .scale(handle: h, bounds: b, current: snapped(p, event: event))
         case .create(let start, _, _): drag = .create(start: start, current: snapped(p, event: event), shift: event.modifierFlags.contains(.shift))
         case .penDrag(let anchor, _): drag = .penDrag(anchor: anchor, current: p)
+        case .editPoint(let id, let part, _, let original, _):
+            // Always move from the path as it was when the drag began.
+            if let s = state, let o = s.doc.objects.first(where: { $0.id == id }), let base = PathEditing.editablePath(o.shape) {
+                dragEditPoint(objectID: id, part: part, path: base, original: original, to: p, event: event)
+            }
         case .none: break
         }
         needsDisplay = true
@@ -528,6 +654,21 @@ final class DrawingCanvas: NSView {
         default: break
         }
         switch drag {
+        case .marquee(let start, _) where s.tool == .directSelect:
+            let r = TSDRect(p1: start, p2: p)
+            if r.width * Double(s.zoom) > 3 || r.height * Double(s.zoom) > 3 {
+                // Prefer anchors of an already selected path; otherwise select the objects inside.
+                if let (_, path) = directPath(s) {
+                    let inside = Set(PathEditing.anchors(path).enumerated().filter { r.contains($0.element) }.map { $0.offset })
+                    if !inside.isEmpty { s.selectedAnchors = inside; break }
+                }
+                let hits = s.doc.objects.filter { o in
+                    guard s.isEditable(o), let b = s.objectBounds(o) else { return false }
+                    return b.intersects(r)
+                }.map { $0.id }
+                s.selection = Set(hits)
+                s.selectedAnchors = []
+            }
         case .marquee(let start, _):
             let r = TSDRect(p1: start, p2: p)
             if r.width * Double(s.zoom) > 3 || r.height * Double(s.zoom) > 3 {
@@ -549,6 +690,17 @@ final class DrawingCanvas: NSView {
                 var style = s.newShapeStyle
                 if case .line = shape { style.fillColor = nil }
                 s.add(DesignObject(style: style, shape: shape))
+            }
+        case .editPoint(let id, _, let path, let original, let moved):
+            if moved {
+                let shape = PathEditing.shape(after: path, original: original)
+                s.mutate("Move Point") { doc in
+                    if let i = doc.objects.firstIndex(where: { $0.id == id }) {
+                        doc.objects[i].shape = shape
+                        doc.objects[i].recordType = nil
+                        doc.objects[i].rawCirclePoint = nil
+                    }
+                }
             }
         case .penDrag(let anchor, let current):
             let dragged = anchor.distance(to: current) * Double(s.zoom) > 3
@@ -666,9 +818,11 @@ final class DrawingCanvas: NSView {
         let step = mods.contains(.shift) ? 10.0 : 1.0
         switch event.keyCode {
         case 51, 117: // delete, forward delete
-            if s.tool == .pen, !penSegments.isEmpty { penSegments.removeLast(); penOutHandle = nil; needsDisplay = true } else { s.deleteSelection() }
+            if s.tool == .pen, !penSegments.isEmpty { penSegments.removeLast(); penOutHandle = nil; needsDisplay = true }
+            else if s.tool == .directSelect, !s.selectedAnchors.isEmpty { s.deleteSelectedAnchors() }
+            else { s.deleteSelection() }
         case 53: // escape
-            if s.tool == .pen, !penSegments.isEmpty { finishPen(close: false) } else { s.selection = []; s.tool = .select }
+            if s.tool == .pen, !penSegments.isEmpty { finishPen(close: false) } else { s.selection = []; s.selectedAnchors = []; s.tool = .select }
             needsDisplay = true
         case 36, 76: // return, enter
             if s.tool == .pen { finishPen(close: false) }

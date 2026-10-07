@@ -32,14 +32,20 @@ swift run tsdconv --format svg -o ~/Desktop/out ~/Downloads/  # whole folder
 
 ## Using the app
 
-- **Tools** (palette on the left, or press the key): Select `V`, Rectangle `R`,
-  Ellipse `E`, Line `L`, Arc `A`, Pen `P`, Text `T`. Hold Shift for squares, circles and
-  45° lines. Pen: click for corners, drag for curves, click the first point to close,
-  Enter or Esc to finish.
+- **Tools** (palette on the left, or press the key): Select `V`, Direct Selection `A`,
+  Rectangle `R`, Ellipse `E`, Line `L`, Arc `C`, Pen `P`, Text `T`. Hold Shift for
+  squares, circles and 45° lines. Pen: click for corners, drag for curves, click the first
+  point to close, Enter or Esc to finish.
+- **Direct Selection**: click a shape to see its anchor points, drag an anchor to move it
+  (Shift-click or marquee for several), and drag the handles of a selected anchor to
+  reshape a curve. Delete removes the selected anchors. Rectangles, ellipses, circles and
+  arcs become paths when you edit a point.
 - **Select**: click, Shift-click, or drag a marquee. Drag to move, drag the handles to
   resize (Shift keeps proportions), arrow keys nudge 1 mm (Shift: 10 mm), Delete removes.
-- **Inspector** (⌥⌘I): stroke and fill colours, line type, stroke width (0 is a hairline),
-  position and size, layer, text string, font, size, bold and italic.
+- **Inspector** (⌥⌘I): stroke on or off, colour, fine or thick (fine lines have no width,
+  for plotters and laser cutters; thick lines have a printed width in mm), pattern; fill on
+  or off and colour; position and size, layer, text string, font, height, bold and italic.
+  With nothing selected the same rows set the defaults for new shapes.
 - **Layers** tab: visibility and lock per layer and per object, drag objects to reorder,
   arrows to reorder layers, double-click a layer name to rename, `+` / `−` to add or
   delete layers. The active layer receives new shapes.
