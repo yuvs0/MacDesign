@@ -260,8 +260,9 @@ public enum Fillet {
         let cubics = ring.segments.enumerated().map { Cubic(from: ring.start(of: $0.offset), segment: $0.element) }
         let lengths = cubics.map { $0.length }
 
-        // Plan each corner: how much to cut from each side and the turn angle.
-        struct Plan { var cut: Double; var radius: Double }
+        // Plan each corner: how much to cut from each side and the turn angle. Short sides
+        // cost smoothing first, so a smooth corner keeps the same circle as an arc one.
+        struct Plan { var cut: Double; var radius: Double; var style: FilletStyle }
         var plans: [Int: Plan] = [:]
         var skipped: String?
         for k in wanted.sorted() where ring.canFillet(node: k) {
@@ -271,10 +272,16 @@ public enum Fillet {
             if turn <= minimumTurn * .pi / 180 { skipped = "The sides are tangential or collinear, so there is no corner to round."; continue }
             if turn >= .pi - minimumTurn * .pi / 180 { skipped = "The sides fold back on each other."; continue }
             var r = radius
-            var cut = (1 + xi) * r * tan(turn / 2)
+            var ease = xi
+            let t = r * tan(turn / 2)
             let room = 0.49 * min(lengths[ring.incoming(k)], lengths[ring.outgoing(k)])
-            if cut > room { cut = room; r = cut / ((1 + xi) * tan(turn / 2)) }
-            plans[k] = Plan(cut: cut, radius: r)
+            if t > room {
+                r = room / tan(turn / 2); ease = 0
+            } else if (1 + ease) * t > room {
+                ease = room / t - 1
+            }
+            let cut = (1 + ease) * r * tan(turn / 2)
+            plans[k] = Plan(cut: cut, radius: r, style: ease > 0.001 ? .smooth(ease) : .arc)
         }
         guard !plans.isEmpty else {
             return Result(path: path, count: 0, reason: skipped ?? (wanted.isEmpty ? "No corner selected." : "The ends of an open path can't be rounded."))
@@ -312,7 +319,7 @@ public enum Fillet {
             guard let plan = plans[node], node < ring.nodeCount else { continue }
             let inn = trimmed[k]
             let outSeg = trimmed[(k + 1) % ring.segmentCount]
-            if let fillet = corner(a: inn.p3, u: inn.tangent(1), b: outSeg.p0, v: outSeg.tangent(0), radius: plan.radius, style: style) {
+            if let fillet = corner(a: inn.p3, u: inn.tangent(1), b: outSeg.p0, v: outSeg.tangent(0), radius: plan.radius, style: plan.style) {
                 for c in fillet { out.append(c.segment) }
                 count += 1
             } else {

@@ -308,6 +308,19 @@ final class FilletTests: XCTestCase {
         XCTAssertNil(Fillet.joinAndFillet([a, far], radius: 3, style: .arc))
     }
 
+    /// The apex of a smooth corner sits on the same circle as the arc version, even when
+    /// the sides are too short for the full smoothing.
+    func testSmoothKeepsArcRadiusOnShortSides() {
+        let square = Geometry.path(for: .rect(TSDRect(minX: 0, minY: 0, maxX: 30, maxY: 30)))!
+        func apexDistance(_ style: FilletStyle) -> Double {
+            let p = Fillet.apply(to: square, corners: nil, radius: 14, style: style).path
+            // Nearest point of the outline to the top-right corner (30, 30).
+            return Geometry.polylines(p, steps: 48).flatMap { $0 }.map { $0.distance(to: TSDPoint(x: 30, y: 30)) }.min()!
+        }
+        XCTAssertEqual(apexDistance(.smooth(0.6)), apexDistance(.arc), accuracy: 0.05)
+        XCTAssertEqual(apexDistance(.arc), 14 * (2.0.squareRoot() - 1), accuracy: 0.05)
+    }
+
     func testClosedRectangleAllCorners() {
         let rect = Geometry.path(for: .rect(TSDRect(minX: 0, minY: 0, maxX: 20, maxY: 10)))!
         let r = Fillet.apply(to: rect, corners: nil, radius: 2, style: .arc)
