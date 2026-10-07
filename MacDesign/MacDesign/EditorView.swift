@@ -30,8 +30,13 @@ struct EditorView: View {
                             .allowsHitTesting(false)
                     }
                     Spacer()
-                    ZoomReadout(state: state)
-                        .padding(12)
+                    GlassEffectContainer(spacing: 10) {
+                        HStack(spacing: 10) {
+                            LockControls()
+                            ZoomReadout(state: state)
+                        }
+                    }
+                    .padding(12)
                 }
             }
             if document.doc.isReadOnly {
@@ -63,9 +68,6 @@ struct EditorToolbar: ToolbarContent {
     let fileURL: URL?
 
     var body: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            LockControls()
-        }
         ToolbarItemGroup(placement: .primaryAction) {
             Menu {
                 ForEach(ExportKind.allCases) { kind in
@@ -140,24 +142,48 @@ enum ExportPanel {
 
 // MARK: - Overlays
 
+/// Shared look for the floating glass pills at the bottom of the canvas.
+struct GlassPill: ViewModifier {
+    static let height: CGFloat = 22
+
+    func body(content: Content) -> some View {
+        content
+            .buttonStyle(.borderless)
+            .frame(height: Self.height)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .glassEffect(.regular, in: .capsule)
+    }
+}
+
+/// A hairline between controls that share a pill.
+struct PillDivider: View {
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.2))
+            .frame(width: 1, height: GlassPill.height - 6)
+    }
+}
+
 struct ZoomReadout: View {
     @ObservedObject var state: EditorState
 
     var body: some View {
-        HStack(spacing: 2) {
-            Button { state.zoom(by: 1 / 1.25) } label: { Image(systemName: "minus") }
+        HStack(spacing: 8) {
+            Button { state.zoom(by: 1 / 1.25) } label: { Image(systemName: "minus").frame(width: 20) }
+                .help("Zoom out")
+            PillDivider()
             Button { state.needsZoomToFit = true } label: {
                 Text("\(Int((state.zoom * 25.4 / 72 * 100).rounded()))%")
                     .monospacedDigit()
                     .frame(minWidth: 48)
             }
             .help("Zoom to fit")
-            Button { state.zoom(by: 1.25) } label: { Image(systemName: "plus") }
+            PillDivider()
+            Button { state.zoom(by: 1.25) } label: { Image(systemName: "plus").frame(width: 20) }
+                .help("Zoom in")
         }
-        .buttonStyle(.borderless)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .glassEffect(.regular, in: .capsule)
+        .modifier(GlassPill())
     }
 }
 
@@ -381,8 +407,7 @@ struct AlignMenuItems: View {
 }
 
 
-/// Joined pair at the left of the toolbar: the lock mode (cycles grid, step, none) and
-/// object snapping. One toolbar item, so they share a single glass capsule.
+/// Lock mode (cycles grid, step, none) and object snapping, sharing one pill beside the zoom.
 struct LockControls: View {
     @AppStorage(GridPrefs.lockModeKey) private var lockMode = LockMode.grid.rawValue
     @AppStorage(GridPrefs.snapToObjectsKey) private var snapToObjects = true
@@ -390,29 +415,30 @@ struct LockControls: View {
     private var mode: LockMode { LockMode(rawValue: lockMode) ?? .grid }
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 8) {
             Button {
                 withAnimation(.snappy) { lockMode = mode.next.rawValue }
             } label: {
                 Image(systemName: mode.systemImage)
                     .contentTransition(.symbolEffect(.replace.downUp))
-                    .frame(width: 26, height: 22)
+                    .frame(width: 20)
             }
             .help("\(mode.title): click to change. Grid lock snaps to the grid, step lock to every millimetre.")
             .accessibilityLabel(mode.title)
+
+            PillDivider()
 
             Button {
                 withAnimation(.snappy) { snapToObjects.toggle() }
             } label: {
                 Image(systemName: "circle.and.line.horizontal")
-                    .frame(width: 26, height: 22)
-                    .foregroundStyle(snapToObjects ? Color.white : Color.primary)
-                    .background(snapToObjects ? Color.accentColor : Color.clear, in: .rect(cornerRadius: 6))
+                    .frame(width: 20)
+                    .foregroundStyle(snapToObjects ? Color.accentColor : Color.primary)
             }
             .help("Snap to the edges and centres of other objects and the page")
             .accessibilityLabel("Snap to Objects")
             .accessibilityAddTraits(snapToObjects ? .isSelected : [])
         }
-        .buttonStyle(.borderless)
+        .modifier(GlassPill())
     }
 }
