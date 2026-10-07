@@ -19,7 +19,6 @@ struct EditorView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             CanvasView(state: state, doc: document.doc)
-                .ignoresSafeArea()
             ToolPalette(state: state)
                 .padding(12)
                 .zIndex(1)
@@ -28,13 +27,13 @@ struct EditorView: View {
                 HStack {
                     if let msg = state.statusMessage {
                         Text(msg).font(.caption.monospaced()).padding(8).glassEffect(.regular, in: .capsule).padding(12)
+                            .allowsHitTesting(false)
                     }
                     Spacer()
                     ZoomReadout(state: state)
                         .padding(12)
                 }
             }
-            .allowsHitTesting(false)
             if document.doc.isReadOnly {
                 VStack {
                     ReadOnlyBanner(reason: document.doc.fallbackReason)

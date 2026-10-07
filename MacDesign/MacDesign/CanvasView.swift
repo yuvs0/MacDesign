@@ -56,7 +56,7 @@ final class DrawingCanvas: NSView {
         super.viewDidMoveToWindow()
         window?.acceptsMouseMovedEvents = true
         if let s = state, s.needsZoomToFit, bounds.width > 10 {
-            s.zoomToFit(in: bounds.size)
+            scheduleFit()
         }
     }
 
@@ -69,6 +69,7 @@ final class DrawingCanvas: NSView {
     }
 
     private var lastLaidOutSize: CGSize = .zero
+    private var lastFitSize: CGSize = .zero
 
     override func layout() {
         super.layout()
@@ -81,15 +82,30 @@ final class DrawingCanvas: NSView {
     }
 
     /// Fits the page on first appearance and whenever the view is resized before the
-    /// user has zoomed or panned themselves.
+    /// user has zoomed or panned themselves. State changes are deferred: publishing
+    /// from inside AppKit's layout pass re-enters SwiftUI and throws.
     private func fitIfNeeded() {
         guard let s = state else { return }
         s.viewSize = bounds.size
         let sizeChanged = abs(bounds.width - lastLaidOutSize.width) > 1 || abs(bounds.height - lastLaidOutSize.height) > 1
         lastLaidOutSize = bounds.size
         if bounds.width > 10, s.needsZoomToFit || (sizeChanged && !s.hasUserAdjustedView) {
-            s.zoomToFit(in: bounds.size)
-            needsDisplay = true
+            scheduleFit()
+        }
+    }
+
+    private var fitScheduled = false
+
+    private func scheduleFit() {
+        guard !fitScheduled else { return }
+        fitScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let s = self.state else { return }
+            self.fitScheduled = false
+            guard self.bounds.width > 10 else { return }
+            self.lastFitSize = self.bounds.size
+            s.zoomToFit(in: self.bounds.size)
+            self.needsDisplay = true
         }
     }
 
@@ -106,6 +122,12 @@ final class DrawingCanvas: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext, let s = state else { return }
+        // The hosting view can resize without calling layout; make sure the page fits
+        // the actual bounds until the user takes over the view.
+        if !s.hasUserAdjustedView, bounds.width > 10,
+           abs(bounds.width - lastFitSize.width) > 1 || abs(bounds.height - lastFitSize.height) > 1 {
+            scheduleFit()
+        }
         let doc = s.doc
 
         // Background and page.
