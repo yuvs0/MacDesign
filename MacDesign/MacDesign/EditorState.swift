@@ -3,6 +3,11 @@ import Combine
 import AppKit
 import TSDKit
 
+struct FilletPreview: Equatable {
+    var radius: Double
+    var style: FilletStyle
+}
+
 enum Tool: String, CaseIterable, Identifiable {
     case select, directSelect, rectangle, ellipse, line, arc, pen, text
 
@@ -428,6 +433,27 @@ final class EditorState: ObservableObject {
     @Published var explodeRequest = false
     /// Set to show the Fillet sheet.
     @Published var filletRequest = false
+    /// While the Fillet sheet is open: what it would do, drawn on the canvas in place of the selection.
+    @Published var filletPreview: FilletPreview?
+
+    /// The objects the preview replaces and what it draws instead, or nil when there's nothing to show.
+    func filletPreviewObjects() -> (replacing: Set<UUID>, with: [DesignObject])? {
+        guard let pv = filletPreview else { return nil }
+        let objs = selectedObjects.filter { isEditable($0) }
+        guard !objs.isEmpty else { return nil }
+        if objs.count >= 2 {
+            guard let (joined, result) = Fillet.joinAndFillet(objs, radius: pv.radius, style: pv.style), result.count > 0 else { return nil }
+            return (Set(objs.map { $0.id }), [joined])
+        }
+        let o = objs[0]
+        guard let path = PathEditing.editablePath(o.shape) else { return nil }
+        let corners: Set<Int>? = selectedAnchors.isEmpty ? nil : Set(selectedAnchors.map { min($0, path.segments.count - 1) })
+        let result = Fillet.apply(to: path, corners: corners, radius: pv.radius, style: pv.style)
+        guard result.count > 0 else { return nil }
+        var preview = o
+        preview.shape = .path(result.path)
+        return ([o.id], [preview])
+    }
 
     /// Shows a message at the bottom of the canvas for a few seconds.
     func flash(_ message: String) {

@@ -165,7 +165,20 @@ final class DrawingCanvas: NSView {
         var options = Renderer.Options()
         options.minimumStrokeWidth = 1.0 / Double(s.zoom)
         let live = liveTransform()
+        let preview = s.filletPreviewObjects()
+        var previewDrawn = false
         for o in doc.objects {
+            if let preview, preview.replacing.contains(o.id) {
+                // Draw the fillet preview once, in place of the first object it replaces.
+                if !previewDrawn {
+                    previewDrawn = true
+                    for p in preview.with {
+                        drawHalo(p, in: ctx, state: s)
+                        Renderer.draw(p, in: ctx, doc: doc, options: options)
+                    }
+                }
+                continue
+            }
             var drawn = o
             if let m = live, s.selection.contains(o.id) {
                 drawn = Geometry.transform(o, by: m)

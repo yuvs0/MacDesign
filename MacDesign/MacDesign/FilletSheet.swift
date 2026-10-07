@@ -29,6 +29,18 @@ struct FilletSheet: View {
     @AppStorage(FilletPrefs.radiusKey) private var radius = 5.0
     @AppStorage(FilletPrefs.smoothKey) private var smooth = false
     @AppStorage(FilletPrefs.smoothingKey) private var smoothing = 0.6
+    /// Typed text, so the canvas previews every keystroke rather than waiting for Return.
+    @State private var radiusText = ""
+
+    private var typedRadius: Double? {
+        Double(radiusText.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces))
+    }
+
+    private var style: FilletStyle { smooth ? .smooth(smoothing) : .arc }
+
+    private func updatePreview() {
+        state.filletPreview = typedRadius.flatMap { $0 > 0 ? FilletPreview(radius: $0, style: style) : nil }
+    }
 
     var body: some View {
         VStack(spacing: 18) {
@@ -37,14 +49,14 @@ struct FilletSheet: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             HStack(spacing: 16) {
-                OptionCard(title: "Arc", caption: "A circular arc, tangent to both sides (G1).",
+                OptionCard(title: "Arc", caption: "A constant radius corner, formed using part of a circle.",
                            selected: !smooth) { smooth = false } content: { FilletThumbnail(style: .arc) }
-                OptionCard(title: "Smooth", caption: "Curvature eases in, like Apple's shapes. \(Int((smoothing * 100).rounded()))% in Settings.",
+                OptionCard(title: "Smooth", caption: "Curvature eases into and out of the corner. Adjust smoothing in preferences.",
                            selected: smooth) { smooth = true } content: { FilletThumbnail(style: .smooth(smoothing)) }
             }
             HStack {
                 Text("Radius")
-                TextField("", value: $radius, format: .number)
+                TextField("", text: $radiusText)
                     .frame(width: 70)
                     .multilineTextAlignment(.trailing)
                 Text("mm").foregroundStyle(.secondary)
@@ -52,16 +64,26 @@ struct FilletSheet: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button("Fillet") {
-                    state.fillet(radius: radius, style: smooth ? .smooth(smoothing) : .arc)
+                    guard let r = typedRadius, r > 0 else { return }
+                    radius = r
+                    state.filletPreview = nil
+                    state.fillet(radius: r, style: style)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-                .disabled(radius <= 0)
+                .disabled((typedRadius ?? 0) <= 0)
             }
         }
         .padding(20)
         .frame(width: 520)
+        .onAppear {
+            radiusText = radius == radius.rounded() ? String(Int(radius)) : String(radius)
+            updatePreview()
+        }
+        .onChange(of: radiusText) { _, _ in updatePreview() }
+        .onChange(of: smooth) { _, _ in updatePreview() }
+        .onDisappear { state.filletPreview = nil }
     }
 }
 
@@ -71,12 +93,12 @@ struct FilletThumbnail: View {
 
     var body: some View {
         Canvas { ctx, size in
-            let corner = PathData(segments: [.move(TSDPoint(x: 0, y: 0)), .line(TSDPoint(x: 80, y: 0)), .line(TSDPoint(x: 80, y: 80))], isClosed: false)
-            let filleted = Fillet.apply(to: corner, corners: nil, radius: 32, style: style).path
-            let ox = size.width / 2 - 40, oy = size.height / 2 + 40
+            let corner = PathData(segments: [.move(TSDPoint(x: 0, y: 0)), .line(TSDPoint(x: 96, y: 0)), .line(TSDPoint(x: 96, y: 96))], isClosed: false)
+            let filleted = Fillet.apply(to: corner, corners: nil, radius: 56, style: style).path
+            let ox = size.width / 2 - 48, oy = size.height / 2 + 48
             func pt(_ p: TSDPoint) -> CGPoint { CGPoint(x: ox + p.x, y: oy - p.y) }
             var sharp = Path()
-            sharp.move(to: pt(TSDPoint(x: 40, y: 0))); sharp.addLine(to: pt(TSDPoint(x: 80, y: 0))); sharp.addLine(to: pt(TSDPoint(x: 80, y: 40)))
+            sharp.move(to: pt(TSDPoint(x: 30, y: 0))); sharp.addLine(to: pt(TSDPoint(x: 96, y: 0))); sharp.addLine(to: pt(TSDPoint(x: 96, y: 66)))
             ctx.stroke(sharp, with: .color(.secondary.opacity(0.4)), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
             var path = Path()
             for seg in filleted.segments {
