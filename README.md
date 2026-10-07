@@ -63,8 +63,8 @@ swift run tsdconv --format svg -o ~/Desktop/out ~/Downloads/  # whole folder
 - **Object** menu: group, ungroup, bring forward or send backward. **Make Path** (⌘H)
   joins the selected shapes wherever their ends touch: one contiguous run becomes a single
   path, several runs become a group of paths. **Explode…** (⌘E) asks how far to go:
-  one level (a group into its members, a path into its separate runs, a run into its
-  segments) or fully (down to lines, curves, circles and arcs).
+  one level (a group into its members, a path into its separate runs; joined lines stay
+  joined) or fully (down to lines, curves, circles and arcs).
 - **File > Save** writes `.3vs`. **Export** (toolbar) writes SVG, DXF, PDF or PNG.
 - Pinch or ⌘-scroll to zoom, two-finger scroll to pan, ⌘0 to fit the page.
 

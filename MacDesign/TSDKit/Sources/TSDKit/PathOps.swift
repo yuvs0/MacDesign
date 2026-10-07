@@ -123,33 +123,45 @@ public enum PathOps {
         }
     }
 
-    /// Explode fully: keeps splitting until only primitives remain.
+    /// Explode fully: keeps splitting until only primitives remain, cutting each contiguous
+    /// run into its segments.
     public static func explodeFully(_ object: DesignObject) -> [DesignObject] {
         if isPrimitive(object) { return [object] }
         let parts = explode(object)
-        if parts.count == 1, parts[0].shape == object.shape { return parts }
+        if parts.count == 1 {
+            // A single run: cut it into segments.
+            guard let run = chains(of: object).first, run.segments.count > 1 else { return parts }
+            var from = run.start
+            return run.segments.map { seg in
+                let piece = PathData(segments: [.move(from), seg], isClosed: false)
+                from = seg.endPoint
+                return part(of: object, path: piece)
+            }
+        }
         return parts.flatMap { explodeFully($0) }
     }
 
-    /// Explode, one level: a group becomes its members; a path with several runs becomes one
-    /// object per run; a single run becomes one object per segment. Primitives stay.
-    public static func explode(_ object: DesignObject) -> [DesignObject] {
-        func part(_ path: PathData) -> DesignObject {
-            var o = object
-            o.id = UUID()
-            o.fileID = 0
-            o.recordType = nil
-            o.rawBody = nil
-            o.rawCirclePoint = nil
-            o.name = nil
-            if path.segments.count == 2, case .move(let a) = path.segments[0], case .line(let b) = path.segments[1] {
-                o.shape = .line(a, b)
-            } else {
-                o.shape = Geometry.recognise(path)
-            }
-            if !path.isClosed { o.style.fill = .none }
-            return o
+    /// A piece of `object` with the same style and layer.
+    static func part(of object: DesignObject, path: PathData) -> DesignObject {
+        var o = object
+        o.id = UUID()
+        o.fileID = 0
+        o.recordType = nil
+        o.rawBody = nil
+        o.rawCirclePoint = nil
+        o.name = nil
+        if path.segments.count == 2, case .move(let a) = path.segments[0], case .line(let b) = path.segments[1] {
+            o.shape = .line(a, b)
+        } else {
+            o.shape = Geometry.recognise(path)
         }
+        if !path.isClosed { o.style.fill = .none }
+        return o
+    }
+
+    /// Explode, one level: a group becomes its members; a path with several runs becomes one
+    /// object per run. A single contiguous run stays joined. Primitives stay.
+    public static func explode(_ object: DesignObject) -> [DesignObject] {
         switch object.shape {
         case .group(let kids):
             return kids.map { k in var c = k; c.layer = object.layer; c.fileID = 0; return c }
@@ -157,14 +169,8 @@ public enum PathOps {
             return [object]
         default:
             let runs = chains(of: object)
-            if runs.count > 1 { return runs.map { part($0.path) } }
-            guard let run = runs.first, run.segments.count > 1 else { return [object] }
-            var from = run.start
-            return run.segments.map { seg in
-                let piece = PathData(segments: [.move(from), seg], isClosed: false)
-                from = seg.endPoint
-                return part(piece)
-            }
+            return runs.count > 1 ? runs.map { part(of: object, path: $0.path) } : [object]
         }
     }
+
 }

@@ -233,13 +233,16 @@ final class PathOpsTests: XCTestCase {
         let group = DesignObject(shape: .group(made))
         let level1 = PathOps.explode(group)
         XCTAssertEqual(level1.count, 2)
-        let level2 = PathOps.explode(level1[0])
+        // One level leaves a contiguous run alone; only Fully cuts it into segments.
+        XCTAssertEqual(PathOps.explode(level1[0]).count, 1)
+        let level2 = PathOps.explodeFully(level1[0])
         XCTAssertEqual(level2.count, 2)
         if case .line(let a, let b) = level2[1].shape {
             XCTAssertEqual(a, TSDPoint(x: 10, y: 0)); XCTAssertEqual(b, TSDPoint(x: 10, y: 10))
         } else { XCTFail("segment should read back as a line") }
         let rect = DesignObject(shape: .rect(TSDRect(minX: 0, minY: 0, maxX: 10, maxY: 5)))
-        XCTAssertEqual(PathOps.explode(rect).count, 4)
+        XCTAssertEqual(PathOps.explode(rect).count, 1)
+        XCTAssertEqual(PathOps.explodeFully(rect).count, 4)
     }
 
     func testReversedCurveKeepsShape() {

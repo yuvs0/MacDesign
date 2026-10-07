@@ -12,7 +12,7 @@ struct ExplodeSheet: View {
             Text("Explode \(state.selection.count == 1 ? "Object" : "\(state.selection.count) Objects")")
                 .font(.headline)
             HStack(spacing: 16) {
-                ExplodeOption(title: "One level", caption: "Separates runs that don't touch. Joined paths stay joined.",
+                ExplodeOption(title: "One level", caption: "Splits groups, and paths into runs that don't touch. Joined lines stay joined.",
                               selected: !fully) { fully = false } content: { OneLevelThumbnail() }
                 ExplodeOption(title: "Fully", caption: "Breaks everything down to lines, curves and circles.",
                               selected: fully) { fully = true } content: { FullyThumbnail() }
