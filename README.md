@@ -58,7 +58,10 @@ swift run tsdconv --format svg -o ~/Desktop/out ~/Downloads/  # whole folder
 - **Align**: the align button in the toolbar, **Object > Align**, or the row in the
   inspector. One selected object aligns to the page; several align to each other. With
   three or more, distribute spaces them evenly.
-- **Object** menu: group, ungroup, bring forward or send backward.
+- **Object** menu: group, ungroup, bring forward or send backward. **Make Path** (⌘J)
+  joins the selected shapes wherever their ends touch: one contiguous run becomes a single
+  path, several runs become a group of paths. **Explode** (⇧⌘J) splits one level at a
+  time: a group into its members, a path into its separate runs, a run into its segments.
 - **File > Save** writes `.3vs`. **Export** (toolbar) writes SVG, DXF, PDF or PNG.
 - Pinch or ⌘-scroll to zoom, two-finger scroll to pan, ⌘0 to fit the page.
 

@@ -206,3 +206,46 @@ final class TSDKitTests: XCTestCase {
         XCTAssertFalse(Renderer.pdfData(for: doc).isEmpty)
     }
 }
+
+final class PathOpsTests: XCTestCase {
+    func line(_ a: (Double, Double), _ b: (Double, Double)) -> DesignObject {
+        DesignObject(shape: .line(TSDPoint(x: a.0, y: a.1), TSDPoint(x: b.0, y: b.1)))
+    }
+
+    func testMakePathJoinsTouchingRunsAndKeepsOthersApart() {
+        // Three lines forming an open L-Z shape, and four more forming a closed square elsewhere.
+        let three = [line((0, 0), (10, 0)), line((10, 10), (10, 0)), line((10, 10), (20, 10))]   // middle one reversed
+        let four = [line((50, 50), (60, 50)), line((60, 50), (60, 60)), line((60, 60), (50, 60)), line((50, 60), (50, 50))]
+        let parts = PathOps.makePath(three + four)
+        XCTAssertEqual(parts.count, 2)
+        guard case .path(let a) = parts[0].shape, case .path(let b) = parts[1].shape else { return XCTFail("paths") }
+        XCTAssertEqual(a.segments.count, 4)   // move + 3 lines
+        XCTAssertFalse(a.isClosed)
+        XCTAssertEqual(a.segments.last?.endPoint, TSDPoint(x: 20, y: 10))
+        XCTAssertEqual(b.segments.count, 5)
+        XCTAssertTrue(b.isClosed)
+    }
+
+    func testExplodeOneLevel() {
+        let three = [line((0, 0), (10, 0)), line((10, 0), (10, 10))]
+        let four = [line((50, 50), (60, 50)), line((60, 50), (60, 60))]
+        let made = PathOps.makePath(three + four)
+        let group = DesignObject(shape: .group(made))
+        let level1 = PathOps.explode(group)
+        XCTAssertEqual(level1.count, 2)
+        let level2 = PathOps.explode(level1[0])
+        XCTAssertEqual(level2.count, 2)
+        if case .line(let a, let b) = level2[1].shape {
+            XCTAssertEqual(a, TSDPoint(x: 10, y: 0)); XCTAssertEqual(b, TSDPoint(x: 10, y: 10))
+        } else { XCTFail("segment should read back as a line") }
+        let rect = DesignObject(shape: .rect(TSDRect(minX: 0, minY: 0, maxX: 10, maxY: 5)))
+        XCTAssertEqual(PathOps.explode(rect).count, 4)
+    }
+
+    func testReversedCurveKeepsShape() {
+        let c = PathOps.Chain(start: TSDPoint(x: 0, y: 0), segments: [.curve(TSDPoint(x: 1, y: 2), TSDPoint(x: 3, y: 2), TSDPoint(x: 4, y: 0))])
+        let r = c.reversed()
+        XCTAssertEqual(r.start, TSDPoint(x: 4, y: 0))
+        XCTAssertEqual(r.segments, [.curve(TSDPoint(x: 3, y: 2), TSDPoint(x: 1, y: 2), TSDPoint(x: 0, y: 0))])
+    }
+}

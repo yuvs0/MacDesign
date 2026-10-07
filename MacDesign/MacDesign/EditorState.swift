@@ -23,8 +23,8 @@ enum Tool: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .select: return "arrow.up.left"
-        case .directSelect: return "cursorarrow"
+        case .select: return "cursorarrow"
+        case .directSelect: return "point.topleft.down.to.point.bottomright.curvepath"
         case .rectangle: return "rectangle"
         case .ellipse: return "circle"
         case .line: return "line.diagonal"
@@ -400,6 +400,51 @@ final class EditorState: ObservableObject {
                 if let m = moves[doc.objects[i].id] { doc.objects[i] = Geometry.transform(doc.objects[i], by: m) }
             }
         }
+    }
+
+    // MARK: Make Path and Explode
+
+    /// Joins the selected objects' paths wherever their ends touch. One contiguous run becomes
+    /// a single path; several runs become a group of paths.
+    func makePath() {
+        let objs = selectedObjects.filter { isEditable($0) }
+        guard !objs.isEmpty else { return }
+        let ids = Set(objs.map { $0.id })
+        let parts = PathOps.makePath(objs)
+        guard !parts.isEmpty else { return }
+        var newID = UUID()
+        mutate("Make Path") { doc in
+            guard let at = doc.objects.firstIndex(where: { ids.contains($0.id) }) else { return }
+            doc.objects.removeAll { ids.contains($0.id) }
+            let result = parts.count == 1 ? parts[0] : DesignObject(layer: parts[0].layer, shape: .group(parts))
+            newID = result.id
+            doc.objects.insert(result, at: min(at, doc.objects.count))
+        }
+        selection = [newID]
+        selectedAnchors = []
+    }
+
+    /// Splits each selected object one level: groups into members, paths into their
+    /// separate runs, and a single run into its segments.
+    func explode() {
+        let ids = selection
+        guard !ids.isEmpty else { return }
+        var newIDs: Set<UUID> = []
+        mutate("Explode") { doc in
+            var result: [DesignObject] = []
+            for o in doc.objects {
+                if ids.contains(o.id), isEditable(o) {
+                    let parts = PathOps.explode(o)
+                    result.append(contentsOf: parts)
+                    newIDs.formUnion(parts.map { $0.id })
+                } else {
+                    result.append(o)
+                }
+            }
+            doc.objects = result
+        }
+        selection = newIDs
+        selectedAnchors = []
     }
 
     func groupSelection() {

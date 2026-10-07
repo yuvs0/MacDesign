@@ -217,6 +217,13 @@ struct EditorCommands: Commands {
                 .keyboardShortcut("g", modifiers: [.command, .shift])
                 .disabled(state?.selection.isEmpty ?? true)
             Divider()
+            Button("Make Path") { state?.makePath() }
+                .keyboardShortcut("j", modifiers: .command)
+                .disabled(state?.selection.isEmpty ?? true)
+            Button("Explode") { state?.explode() }
+                .keyboardShortcut("j", modifiers: [.command, .shift])
+                .disabled(state?.selection.isEmpty ?? true)
+            Divider()
             Button("Bring to Front") { state?.arrange(.front) }
                 .keyboardShortcut("]", modifiers: [.command, .option])
             Button("Bring Forward") { state?.arrange(.forward) }
