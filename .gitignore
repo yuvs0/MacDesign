@@ -1,0 +1,16 @@
+.DS_Store
+.build/
+.swiftpm/
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+Package.resolved
+
+# Student work should not be committed. Keep real files in a local folder.
+samples/
+dev-build.command
+dev-build.log
+dev-test.command
+dev-test.log
+dev-app.command
+dev-app.log
