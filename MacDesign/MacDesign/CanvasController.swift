@@ -575,6 +575,12 @@ final class CanvasController {
                 drag = .marquee(start: p, current: p)
             }
         case .rectangle, .ellipse, .line, .arc:
+            // A press on a handle of the shape just drawn resizes it instead of starting another.
+            if let h = handleIndex(at: vp), let b = s.selectionBounds {
+                beginSnapping(excluding: s.selection)
+                drag = .scale(handle: h, bounds: b, current: p)
+                break
+            }
             beginSnapping(excluding: [])
             p = snapped(p)
             drag = .create(start: p, current: p, shift: shift)
