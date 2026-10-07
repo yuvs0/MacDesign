@@ -223,19 +223,8 @@ struct PropertiesPanel: View {
     }
 
     private var geometrySection: some View {
-        Section("Geometry") {
-            if let b = state.selectionBounds {
-                numberRow("X", value: b.minX) { newX in state.transformSelection(.translation(newX - b.minX, 0), actionName: "Move") }
-                numberRow("Y", value: b.minY) { newY in state.transformSelection(.translation(0, newY - b.minY), actionName: "Move") }
-                numberRow("Width", value: b.width) { w in
-                    guard b.width > 1e-9, w > 0 else { return }
-                    state.transformSelection(.scale(w / b.width, 1, about: TSDPoint(x: b.minX, y: b.minY)), actionName: "Resize")
-                }
-                numberRow("Height", value: b.height) { h in
-                    guard b.height > 1e-9, h > 0 else { return }
-                    state.transformSelection(.scale(1, h / b.height, about: TSDPoint(x: b.minX, y: b.minY)), actionName: "Resize")
-                }
-            }
+        Section("Transform") {
+            TransformPanel(state: state)
             if let o = single, case .arc(let c, let rx, let ry, let a0, let a1) = o.shape {
                 numberRow("Start angle", value: a0) { v in state.updateSelected("Change Arc") { $0.shape = .arc(center: c, rx: rx, ry: ry, startAngle: v, endAngle: a1) } }
                 numberRow("End angle", value: a1) { v in state.updateSelected("Change Arc") { $0.shape = .arc(center: c, rx: rx, ry: ry, startAngle: a0, endAngle: v) } }

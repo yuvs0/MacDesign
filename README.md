@@ -44,7 +44,7 @@ swift run tsdconv --format svg -o ~/Desktop/out ~/Downloads/  # whole folder
   resize (Shift keeps proportions), arrow keys nudge 1 mm (Shift: 10 mm), Delete removes.
 - **Inspector** (⌥⌘I): stroke on or off, colour, fine or thick (fine lines have no width,
   for plotters and laser cutters; thick lines have a printed width in mm), pattern; fill on
-  or off and colour; position and size, layer, text string, font, height, bold and italic.
+  or off and colour; an Illustrator-style transform panel (reference point grid, X, Y, W, H with a proportions lock), layer, text string, font, height, bold and italic.
   With nothing selected the same rows set the defaults for new shapes.
 - **Layers** tab: visibility and lock per layer and per object, drag objects to reorder,
   arrows to reorder layers, double-click a layer name to rename, `+` / `−` to add or
