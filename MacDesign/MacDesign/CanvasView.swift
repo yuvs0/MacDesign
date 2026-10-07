@@ -72,12 +72,24 @@ final class DrawingCanvas: NSView {
 
     override func layout() {
         super.layout()
+        fitIfNeeded()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        fitIfNeeded()
+    }
+
+    /// Fits the page on first appearance and whenever the view is resized before the
+    /// user has zoomed or panned themselves.
+    private func fitIfNeeded() {
         guard let s = state else { return }
         s.viewSize = bounds.size
         let sizeChanged = abs(bounds.width - lastLaidOutSize.width) > 1 || abs(bounds.height - lastLaidOutSize.height) > 1
         lastLaidOutSize = bounds.size
         if bounds.width > 10, s.needsZoomToFit || (sizeChanged && !s.hasUserAdjustedView) {
             s.zoomToFit(in: bounds.size)
+            needsDisplay = true
         }
     }
 
