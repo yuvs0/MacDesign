@@ -113,27 +113,36 @@ struct EditorToolbar: ToolbarContent {
     @ObservedObject var document: DesignDocument
     let fileURL: URL?
 
-    var body: some ToolbarContent {
-        ToolbarItemGroup(placement: .navigation) {
-            Button {
-                state.undo()
-            } label: {
-                Label("Undo", systemImage: "arrow.uturn.backward")
-            }
-            .disabled(!state.canUndo)
-            .help("Undo")
-
-            Button {
-                state.redo()
-            } label: {
-                Label("Redo", systemImage: "arrow.uturn.forward")
-            }
-            .disabled(!state.canRedo)
-            .help("Redo")
+    @ViewBuilder
+    private var undoRedo: some View {
+        Button {
+            state.undo()
+        } label: {
+            Label("Undo", systemImage: "arrow.uturn.backward")
         }
+        .disabled(!state.canUndo)
+        .help("Undo")
+
+        Button {
+            state.redo()
+        } label: {
+            Label("Redo", systemImage: "arrow.uturn.forward")
+        }
+        .disabled(!state.canRedo)
+        .help("Redo")
+    }
+
+    var body: some ToolbarContent {
+        #if os(macOS)
+        ToolbarItemGroup(placement: .navigation) { undoRedo }
+        #endif
 
         ToolbarItemGroup(placement: .primaryAction) {
             #if os(iOS)
+            // On iPadOS 26 items at the leading edge next to the document title vanish after a
+            // few edits (the system rebuilds that side of the bar), so Undo and Redo sit here.
+            undoRedo
+            Spacer()
             Menu {
                 Picker("Input", selection: $state.inputMode) {
                     ForEach(InputMode.allCases) { mode in
@@ -442,6 +451,7 @@ struct ViewMenuItems: View {
     @AppStorage(GridPrefs.gridSpacingKey) private var gridSpacing = 10.0
     @AppStorage(GridPrefs.majorEveryKey) private var majorEvery = 1
     @AppStorage(GridPrefs.hapticsKey) private var haptics = true
+    @AppStorage(GridPrefs.attachKey) private var attach = false
 
     var body: some View {
         Button("Zoom In") { state?.zoom(by: 1.25) }
@@ -461,6 +471,8 @@ struct ViewMenuItems: View {
             .keyboardShortcut("l", modifiers: .command)
         Toggle("Snap to Objects", isOn: $snapToObjects)
             .keyboardShortcut("'", modifiers: [.command, .shift])
+        Toggle("Attach", isOn: $attach)
+            .keyboardShortcut(";", modifiers: .command)
         Menu("Grid Spacing") {
             ForEach(GridPrefs.spacingPresets, id: \.self) { v in
                 Toggle(GridPrefs.spacingLabel(v), isOn: Binding(get: { abs(gridSpacing - v) < 1e-9 }, set: { if $0 { gridSpacing = v } }))
@@ -544,6 +556,7 @@ struct AlignMenuItems: View {
 struct LockControls: View {
     @AppStorage(GridPrefs.lockModeKey) private var lockMode = LockMode.grid.rawValue
     @AppStorage(GridPrefs.snapToObjectsKey) private var snapToObjects = true
+    @AppStorage(GridPrefs.attachKey) private var attach = false
 
     private var mode: LockMode { LockMode(rawValue: lockMode) ?? .grid }
 
@@ -571,6 +584,19 @@ struct LockControls: View {
             .help("Snap to the edges and centres of other objects and the page")
             .accessibilityLabel("Snap to Objects")
             .accessibilityAddTraits(snapToObjects ? .isSelected : [])
+
+            PillDivider()
+
+            Button {
+                withAnimation(.snappy) { attach.toggle() }
+            } label: {
+                Image(systemName: "dot.scope")
+                    .frame(width: 20)
+                    .foregroundStyle(attach ? Color.accentColor : Color.primary)
+            }
+            .help("Attach: a loose click lands on the nearest end point, corner, centre or intersection")
+            .accessibilityLabel("Attach")
+            .accessibilityAddTraits(attach ? .isSelected : [])
         }
         .modifier(GlassPill())
     }

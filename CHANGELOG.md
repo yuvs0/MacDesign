@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Tools
+- Press and hold a palette button for other ways to draw with that tool, as in 2D Design.
+  Rectangle: by corners, around an object, tilted (two taps for one side, then the width), or of a
+  set size. Ellipse: by corners, circle or oval from the centre, circle through two or three
+  points, tangent circle. Line: by ends, set length, set angle, tangent to a circle or arc.
+  Sizes, lengths, angles and side counts are set in the inspector's New Shapes section.
+- Polygon tool (N) with a Star variant.
+- Delete tool variant: Delete Between Intersections removes the part of a line, arc, circle or
+  path between its two nearest crossings, inside groups too (`Trim` in TSDKit).
+- Arc tool icon is a plain arc.
+
+### Canvas
+- Attach, beside the lock and snap controls (⌘;): a loose click lands on the nearest end point,
+  corner, centre or intersection inside the cursor box. A small box shows the point caught.
+- Double-tapping text edits it with any drawing tool, not only Select.
+
+### iPad
+- Long-press context menu opens beside the shape without a snapshot of the canvas.
+- Undo and Redo sit at the start of the trailing toolbar group on iPad: at the leading edge, beside
+  the document title, iPadOS 26 dropped them after a few edits.
+
 ## 0.2.0 (8 October 2026)
 
 ### iPad

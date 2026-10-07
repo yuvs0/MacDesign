@@ -8,7 +8,7 @@ struct FilletPreview: Equatable {
 }
 
 enum Tool: String, CaseIterable, Identifiable {
-    case select, directSelect, rectangle, ellipse, line, arc, pen, text, eraser
+    case select, directSelect, rectangle, ellipse, line, arc, polygon, pen, text, eraser
 
     var id: String { rawValue }
 
@@ -20,6 +20,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .ellipse: return "Ellipse"
         case .line: return "Line"
         case .arc: return "Arc"
+        case .polygon: return "Polygon"
         case .pen: return "Pen"
         case .text: return "Text"
         case .eraser: return "Delete"
@@ -34,6 +35,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .ellipse: return "circle"
         case .line: return "line.diagonal"
         case .arc: return "arrow.counterclockwise"
+        case .polygon: return "pentagon"
         case .pen: return "pencil.and.outline"
         case .text: return "textformat"
         case .eraser: return "eraser"
@@ -48,6 +50,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .ellipse: return "e"
         case .line: return "l"
         case .arc: return "c"
+        case .polygon: return "n"
         case .pen: return "p"
         case .text: return "t"
         case .eraser: return "x"
@@ -108,6 +111,27 @@ final class EditorState: ObservableObject {
     @Published var tool: Tool = .select
     /// The tool in use before the Delete tool was switched on, for switching back.
     private var toolBeforeEraser: Tool = .select
+    /// The drawing method chosen for each tool (press and hold a palette button).
+    @Published var methods: [Tool: DrawMethod] = [:]
+    /// The current tool's method, or nil for tools that have only one way of working.
+    var method: DrawMethod? { methods[tool] ?? DrawMethod.defaultMethod(for: tool) }
+
+    /// Picks a tool and one of its methods.
+    func choose(_ m: DrawMethod) {
+        methods[m.tool] = m
+        tool = m.tool
+        flash(m.hint)
+    }
+
+    // Parameters for the methods that need a number, edited in the inspector.
+    @Published var rectSize = TSDSize(width: 50, height: 30)
+    @Published var lineLength = 50.0
+    /// Degrees anticlockwise from the x axis.
+    @Published var lineAngle = 0.0
+    @Published var polygonSides = 6
+    @Published var starPoints = 5
+    /// Inner radius of a star as a fraction of the outer one.
+    @Published var starInnerRatio = 0.5
     /// iPad only: whether fingers share the current tool with the Pencil or always select.
     @Published var inputMode: InputMode = InputMode(rawValue: UserDefaults.standard.string(forKey: InputMode.key) ?? "") ?? .touch {
         didSet { UserDefaults.standard.set(inputMode.rawValue, forKey: InputMode.key) }

@@ -43,6 +43,7 @@ enum GridPrefs {
     static let gridSpacingKey = "gridSpacing"
     static let majorEveryKey = "gridMajorEvery"
     static let hapticsKey = "snapHaptics"
+    static let attachKey = "attach"
 
     static let spacingPresets: [Double] = [1, 2, 2.5, 5, 10, 20, 25, 50]
     static let majorPresets: [Int] = [1, 2, 4, 5, 10]
@@ -56,6 +57,7 @@ enum GridPrefs {
             gridSpacingKey: 10.0,
             majorEveryKey: 1,
             hapticsKey: true,
+            attachKey: false,
         ])
     }
 
@@ -65,6 +67,7 @@ enum GridPrefs {
     }
     static var snapToObjects: Bool { UserDefaults.standard.bool(forKey: snapToObjectsKey) }
     static var haptics: Bool { UserDefaults.standard.bool(forKey: hapticsKey) }
+    static var attach: Bool { UserDefaults.standard.bool(forKey: attachKey) }
     static var spacing: Double {
         let v = UserDefaults.standard.double(forKey: gridSpacingKey)
         return v > 0 ? v : 10
@@ -121,6 +124,7 @@ struct Snapper {
     var xs: [Target] = []
     var ys: [Target] = []
     var gridSpacing: Double?
+    var attacher: Attacher?
     /// Snap distance in mm (a few screen points at the current zoom).
     var tolerance: Double
 
@@ -129,6 +133,7 @@ struct Snapper {
     init(state: EditorState, excluding: Set<UUID>, enabled: Bool) {
         tolerance = 6 / Double(state.zoom)
         guard enabled else { return }
+        if GridPrefs.attach { attacher = Attacher(state: state, excluding: excluding) }
         switch GridPrefs.lockMode {
         case .grid: gridSpacing = GridPrefs.spacing
         case .step: gridSpacing = GridPrefs.stepSpacing
@@ -158,6 +163,8 @@ struct Snapper {
         var guides: [SnapGuide] = []
         /// Values snapped to on objects or the page, used to decide when to play a haptic.
         var objectSnapKey: [Double] = []
+        /// The point Attach landed on, if it did.
+        var attached: TSDPoint?
     }
 
     /// Best adjustment for any of `values` to meet a target, within tolerance.
@@ -181,6 +188,12 @@ struct Snapper {
     /// wins as in 2D Design; an object edge only takes over when it's closer than the grid.
     func snap(point p: TSDPoint) -> (TSDPoint, Result) {
         var r = Result()
+        if let a = attacher?.find(near: p) {
+            r.attached = a
+            r.offset = (a.x - p.x, a.y - p.y)
+            r.objectSnapKey = [a.x, a.y + 1e6]
+            return (a, r)
+        }
         var q = p
         let gx = gridDelta(p.x), gy = gridDelta(p.y)
         if let hit = nearest([p.x], in: xs), gx == nil || abs(hit.delta) < abs(gx!) {
@@ -225,6 +238,62 @@ struct Snapper {
             r.offset.dy = d
         }
         return r
+    }
+}
+
+/// 2D Design's Attach: a loose click lands on the nearest end point, corner, centre or
+/// intersection inside the cursor box, whatever the lock mode.
+struct Attacher {
+    private var points: [TSDPoint] = []
+    private var objects: [DesignObject] = []
+    /// Half the cursor box, in mm.
+    let tolerance: Double
+
+    @MainActor
+    init(state: EditorState, excluding: Set<UUID>) {
+        tolerance = (Platform.isPad ? 18.0 : 10.0) / Double(state.zoom)
+        for o in state.doc.objects where !excluding.contains(o.id) && o.isVisible {
+            if let layer = state.doc.layer(withIndex: o.layer), !layer.isVisible { continue }
+            objects.append(o)
+            collect(o)
+        }
+    }
+
+    private mutating func collect(_ o: DesignObject) {
+        switch o.shape {
+        case .group(let kids):
+            kids.forEach { collect($0) }
+        case .circle(let c, let r):
+            points.append(c)
+            for (dx, dy) in [(r, 0.0), (-r, 0.0), (0.0, r), (0.0, -r)] { points.append(c.offset(dx: dx, dy: dy)) }
+        case .ellipse(let c, let rx, let ry):
+            points.append(c)
+            for (dx, dy) in [(rx, 0.0), (-rx, 0.0), (0.0, ry), (0.0, -ry)] { points.append(c.offset(dx: dx, dy: dy)) }
+        case .arc(let c, _, _, _, _):
+            points.append(c)
+            if let path = Geometry.path(for: o.shape) { points.append(contentsOf: path.segments.map(\.endPoint)) }
+        case .point(let p):
+            points.append(p)
+        case .text:
+            break
+        default:
+            if let path = Geometry.path(for: o.shape), path.segments.count <= 400 {
+                points.append(contentsOf: path.segments.map(\.endPoint))
+            }
+        }
+    }
+
+    /// The nearest end point, corner, centre or intersection inside the cursor box around p.
+    func find(near p: TSDPoint) -> TSDPoint? {
+        var best: (TSDPoint, Double)?
+        func consider(_ q: TSDPoint) {
+            guard abs(q.x - p.x) <= tolerance, abs(q.y - p.y) <= tolerance else { return }
+            let d = q.distance(to: p)
+            if best == nil || d < best!.1 { best = (q, d) }
+        }
+        points.forEach(consider)
+        Trim.intersections(near: p, tolerance: tolerance, objects: objects).forEach(consider)
+        return best?.0
     }
 }
 

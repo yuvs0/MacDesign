@@ -56,6 +56,8 @@ final class CanvasController {
         case editPoint(objectID: UUID, part: PathEditing.Part, path: PathData, original: TSDKit.Shape, moved: Bool)
         /// Delete tool: everything swept over goes, as one undo step.
         case erase
+        /// A tap placing one of the points a drawing method asks for before the final drag.
+        case placePoint(TSDPoint)
     }
 
     private var drag: Drag = .none
@@ -67,6 +69,24 @@ final class CanvasController {
     /// The tool driving the current press. Usually the editor's tool, but a host can ask
     /// for another one for a single press (iPad: fingers select while the Pencil draws).
     private var activeTool: Tool = .select
+
+    // Drawing methods that start with taps or an object before the final drag.
+    private var pending: [TSDPoint] = []
+    private var pendingObject: DesignObject?
+    /// Where the pending object was tapped (picks which tangent).
+    private var pendingHit: TSDPoint?
+    private var pendingMethod: DrawMethod?
+
+    private func resetPending() {
+        pending = []
+        pendingObject = nil
+        pendingHit = nil
+    }
+
+    /// Where Attach will land the next press, drawn as a small box.
+    private var attachMarker: TSDPoint?
+    private var hoverAttacher: Attacher?
+    private var hoverDoc: TSDDocument?
 
     // Snapping during a drag.
     private var snapper: Snapper?
@@ -216,6 +236,16 @@ final class CanvasController {
     }
 
     private func drawGuides(in ctx: CGContext, state s: EditorState) {
+        if let a = attachMarker {
+            // The cursor box has caught something: mark the point it will use.
+            let v = s.toView(a)
+            let r = CGRect(x: v.x.rounded() - 5.5, y: v.y.rounded() - 5.5, width: 11, height: 11)
+            ctx.saveGState()
+            ctx.setStrokeColor(Platform.guideColor)
+            ctx.setLineWidth(1.5)
+            ctx.stroke(r)
+            ctx.restoreGState()
+        }
         guard !guides.isEmpty else { return }
         ctx.saveGState()
         ctx.setStrokeColor(Platform.guideColor)
@@ -252,11 +282,30 @@ final class CanvasController {
         let lw = 1.0 / Double(s.zoom)
         ctx.setLineWidth(lw)
         ctx.setStrokeColor(Platform.accentColor)
-        if case .create(let start, let current, let shift) = drag, let shape = creationShape(tool: activeTool, start: start, end: current, shift: shift),
+        let method = activeTool == s.tool ? s.method : DrawMethod.defaultMethod(for: activeTool)
+        if case .create(let start, let current, let shift) = drag, let shape = creationShape(method: method, tool: activeTool, start: start, end: current, shift: shift),
            let p = Renderer.cgPath(for: shape) {
             ctx.addPath(p)
             ctx.strokePath()
+        } else if !pending.isEmpty || pendingObject != nil, let m = pointerLocation {
+            // Between taps: show what the next point would give.
+            var end = m
+            if case .placePoint(let q) = drag { end = q }
+            if pending.count >= (method?.pointsFirst ?? 0), let shape = creationShape(method: method, tool: activeTool, start: end, end: end, shift: false),
+               let p = Renderer.cgPath(for: shape) {
+                ctx.addPath(p)
+                ctx.strokePath()
+            } else if pending.count == 1 {
+                ctx.move(to: CGPoint(x: pending[0].x, y: pending[0].y)); ctx.addLine(to: CGPoint(x: end.x, y: end.y))
+                ctx.strokePath()
+            }
         }
+        for q in pending {
+            ctx.setFillColor(CGColor(gray: 1, alpha: 1))
+            let r = CGRect(x: q.x - 3 * lw, y: q.y - 3 * lw, width: 6 * lw, height: 6 * lw)
+            ctx.fillEllipse(in: r); ctx.strokeEllipse(in: r)
+        }
+        if let o = pendingObject { drawHalo(o, in: ctx, state: s) }
         if s.tool == .pen, !penSegments.isEmpty {
             var preview = penSegments
             var handleLines: [(TSDPoint, TSDPoint)] = []
@@ -451,6 +500,7 @@ final class CanvasController {
         guard let snapper, snappingEnabled else { guides = []; haptics.reset(); return p }
         let (q, result) = snapper.snap(point: p)
         guides = result.guides
+        attachMarker = result.attached
         haptics.update(result.objectSnapKey)
         return q
     }
@@ -458,6 +508,7 @@ final class CanvasController {
     private func endSnapping() {
         snapper = nil
         guides = []
+        attachMarker = nil
         haptics.reset()
         moveStartBounds = nil
     }
@@ -547,6 +598,14 @@ final class CanvasController {
         let isDouble = clickCount >= 2
         activeTool = tool ?? s.tool
 
+        // Double-tapping text edits it whatever tool is in use (the Select tool handles its own).
+        if isDouble, ![.select, .directSelect, .eraser, .pen].contains(activeTool),
+           let hit = hitTest(p), case .text = hit.shape {
+            resetPending()
+            editText(hit, state: s)
+            return
+        }
+
         switch activeTool {
         case .directSelect:
             directPointerDown(viewPoint: vp, docPoint: p, state: s)
@@ -556,10 +615,7 @@ final class CanvasController {
                 drag = .scale(handle: h, bounds: b, current: p)
             } else if let hit = hitTest(p) {
                 if isDouble, case .text = hit.shape {
-                    s.selection = [hit.id]
-                    s.showInspector = true
-                    s.inspectorTab = .properties
-                    s.focusTextRequest += 1
+                    editText(hit, state: s)
                     return
                 }
                 if shift {
@@ -574,15 +630,36 @@ final class CanvasController {
                 if !shift { s.selection = [] }
                 drag = .marquee(start: p, current: p)
             }
-        case .rectangle, .ellipse, .line, .arc:
+        case .rectangle, .ellipse, .line, .arc, .polygon:
             // A press on a handle of the shape just drawn resizes it instead of starting another.
             if let h = handleIndex(at: vp), let b = s.selectionBounds {
                 beginSnapping(excluding: s.selection)
                 drag = .scale(handle: h, bounds: b, current: p)
                 break
             }
+            let method = s.method
+            if pendingMethod != method { resetPending(); pendingMethod = method }
+            if let m = method, m.picksObject, pendingObject == nil {
+                guard let hit = hitTest(p) else { s.flash(m.hint); return }
+                switch m {
+                case .rectBounding:
+                    if let b = s.objectBounds(hit) { s.add(DesignObject(style: s.newShapeStyle, shape: .rect(b))) }
+                case .lineTangent where circleOf(hit.shape) == nil:
+                    s.flash("Tangent lines need a circle or an arc")
+                default:
+                    pendingObject = hit
+                    pendingHit = p
+                    s.flash(m.nextHint)
+                }
+                host?.canvasNeedsDisplay()
+                return
+            }
             beginSnapping(excluding: [])
             p = snapped(p)
+            if let m = method, pending.count < m.pointsFirst {
+                drag = .placePoint(p)
+                break
+            }
             drag = .create(start: p, current: p, shift: shift)
         case .pen:
             beginSnapping(excluding: [])
@@ -613,10 +690,50 @@ final class CanvasController {
                 host?.toolChanged()
             }
         case .eraser:
+            if s.method == .deleteBetween {
+                deleteBetween(at: p)
+                break
+            }
             drag = .erase
             erase(at: p)
         }
         host?.canvasNeedsDisplay()
+    }
+
+    /// Selects a text object and puts the inspector's text field in focus.
+    private func editText(_ hit: DesignObject, state s: EditorState) {
+        s.selection = [hit.id]
+        s.showInspector = true
+        s.inspectorTab = .properties
+        s.focusTextRequest += 1
+        host?.canvasNeedsDisplay()
+    }
+
+    /// Delete tool, "between intersections": removes the part of the object under the point
+    /// between its two nearest crossings with other objects (or itself).
+    private func deleteBetween(at p: TSDPoint) {
+        guard let s = state, let hit = hitTest(p) else { return }
+        let others = s.doc.objects.filter { $0.id != hit.id && $0.isVisible }
+        guard let shapes = Trim.deleteBetweenIntersections(of: hit, at: p, others: others) else {
+            s.selection = []
+            s.mutate("Delete") { $0.remove(ids: [hit.id]) }
+            return
+        }
+        s.selection = []
+        s.mutate("Delete Between Intersections") { doc in
+            guard let i = doc.objects.firstIndex(where: { $0.id == hit.id }) else { return }
+            var replacements: [DesignObject] = []
+            for shape in shapes {
+                var o = hit
+                o.id = UUID()
+                o.fileID = 0
+                o.shape = shape
+                o.recordType = nil
+                o.rawCirclePoint = nil
+                replacements.append(o)
+            }
+            doc.objects.replaceSubrange(i...i, with: replacements)
+        }
     }
 
     /// Open while a Delete-tool sweep has removed something, so the whole sweep undoes at once.
@@ -662,6 +779,7 @@ final class CanvasController {
                 dragEditPoint(objectID: id, part: part, path: base, original: original, to: p)
             }
         case .erase: erase(at: p)
+        case .placePoint: drag = .placePoint(snapped(p))
         case .none: break
         }
         host?.canvasNeedsDisplay()
@@ -674,7 +792,7 @@ final class CanvasController {
         var p = s.toDocument(vp)
         // Use the snapped position from the last drag event.
         switch drag {
-        case .scale(_, _, let c), .create(_, let c, _): p = c
+        case .scale(_, _, let c), .create(_, let c, _), .placePoint(let c): p = c
         default: break
         }
         switch drag {
@@ -709,12 +827,19 @@ final class CanvasController {
         case .scale(let h, let b, _):
             s.transformSelection(scaleTransform(handle: h, bounds: b, to: p), actionName: "Resize")
         case .create(let start, _, let shift):
-            if let shape = creationShape(tool: activeTool, start: start, end: p, shift: shift || mods.contains(.shift)),
-               start.distance(to: p) * Double(s.zoom) > 3 {
+            let method = activeTool == s.tool ? s.method : DrawMethod.defaultMethod(for: activeTool)
+            // Methods that fix the size, or take the last point by tapping, don't need a drag.
+            let tapIsEnough = method.map { [.rectSized, .rectTilted, .circleThreePoints, .circleTangent, .lineTangent].contains($0) } ?? false
+            if let shape = creationShape(method: method, tool: activeTool, start: start, end: p, shift: shift || mods.contains(.shift)),
+               tapIsEnough || start.distance(to: p) * Double(s.zoom) > 3 {
                 var style = s.newShapeStyle
                 if case .line = shape { style.fillColor = nil }
                 s.add(DesignObject(style: style, shape: shape))
+                resetPending()
             }
+        case .placePoint(let q):
+            pending.append(q)
+            if let m = pendingMethod, pending.count >= m.pointsFirst { s.flash(m.nextHint) }
         case .editPoint(let id, _, let path, let original, let moved):
             if moved {
                 let shape = PathEditing.shape(after: path, original: original)
@@ -757,8 +882,20 @@ final class CanvasController {
             if snapper == nil { snapper = Snapper(state: s, excluding: [], enabled: true) }
             p = snapped(p)
             host?.canvasNeedsDisplay()
+        } else if case .none = drag, GridPrefs.attach, [.rectangle, .ellipse, .line, .arc, .polygon, .pen].contains(s.tool) {
+            // Show where Attach would land the next press.
+            if hoverAttacher == nil || hoverDoc != s.doc || abs(hoverAttacher!.tolerance * Double(s.zoom) - (Platform.isPad ? 18 : 10)) > 0.01 {
+                hoverAttacher = Attacher(state: s, excluding: [])
+                hoverDoc = s.doc
+            }
+            let marker = hoverAttacher?.find(near: p)
+            if marker != attachMarker { attachMarker = marker; host?.canvasNeedsDisplay() }
+        } else if attachMarker != nil, case .none = drag {
+            attachMarker = nil
+            host?.canvasNeedsDisplay()
         }
         pointerLocation = p
+        if !pending.isEmpty || pendingObject != nil { host?.canvasNeedsDisplay() }
     }
 
     /// Selects what's under a secondary click before a context menu is shown.
@@ -825,6 +962,115 @@ final class CanvasController {
         }
     }
 
+    /// The centre and radius of a circular shape, or nil for anything else.
+    private func circleOf(_ shape: TSDKit.Shape) -> (TSDPoint, Double)? {
+        switch shape {
+        case .circle(let c, let r): return (c, r)
+        case .ellipse(let c, let rx, let ry) where abs(rx - ry) < 1e-9: return (c, rx)
+        case .arc(let c, let rx, let ry, _, _) where abs(rx - ry) < 1e-9: return (c, rx)
+        default: return nil
+        }
+    }
+
+    /// Circle through three points, or nil when they're in a line.
+    private func circumcircle(_ a: TSDPoint, _ b: TSDPoint, _ c: TSDPoint) -> (TSDPoint, Double)? {
+        let d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y))
+        guard abs(d) > 1e-9 else { return nil }
+        let a2 = a.x * a.x + a.y * a.y, b2 = b.x * b.x + b.y * b.y, c2 = c.x * c.x + c.y * c.y
+        let ux = (a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d
+        let uy = (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d
+        let centre = TSDPoint(x: ux, y: uy)
+        return (centre, centre.distance(to: a))
+    }
+
+    private func closedPolyline(_ pts: [TSDPoint]) -> TSDKit.Shape {
+        var segs: [PathSegment] = [.move(pts[0])]
+        for q in pts.dropFirst() { segs.append(.line(q)) }
+        segs.append(.line(pts[0]))
+        return .path(PathData(segments: segs, isClosed: true))
+    }
+
+    /// The shape a drawing method gives for a press at `start` released at `end`, using any
+    /// points or object gathered first. nil when there's nothing to draw yet.
+    private func creationShape(method: DrawMethod?, tool: Tool, start: TSDPoint, end: TSDPoint, shift: Bool) -> TSDKit.Shape? {
+        guard let s = state, let m = method else { return creationShape(tool: tool, start: start, end: end, shift: shift) }
+        let dx = end.x - start.x, dy = end.y - start.y
+        let dist = start.distance(to: end)
+        switch m {
+        case .rectCorners, .ellipseCorners, .lineEnds:
+            return creationShape(tool: tool, start: start, end: end, shift: shift)
+        case .rectBounding, .deleteObject, .deleteBetween:
+            return nil
+        case .rectSized:
+            let w = s.rectSize.width, h = s.rectSize.height
+            guard w > 0, h > 0 else { return nil }
+            let sx: Double = dx < 0 ? -1 : 1, sy: Double = dy < 0 ? -1 : 1
+            return .rect(TSDRect(p1: start, p2: TSDPoint(x: start.x + sx * w, y: start.y + sy * h)))
+        case .rectTilted:
+            guard pending.count >= 2 else { return nil }
+            let a = pending[0], b = pending[1]
+            let len = a.distance(to: b)
+            guard len > 1e-9 else { return nil }
+            let nx = -(b.y - a.y) / len, ny = (b.x - a.x) / len
+            let d = (end.x - a.x) * nx + (end.y - a.y) * ny
+            guard abs(d) > 1e-9 else { return nil }
+            return closedPolyline([a, b, TSDPoint(x: b.x + nx * d, y: b.y + ny * d), TSDPoint(x: a.x + nx * d, y: a.y + ny * d)])
+        case .circleCentre:
+            guard dist > 1e-9 else { return nil }
+            return .circle(center: start, radius: dist)
+        case .ovalCentre:
+            guard abs(dx) > 1e-9, abs(dy) > 1e-9 else { return nil }
+            if shift { let r = max(abs(dx), abs(dy)); return .circle(center: start, radius: r) }
+            return .ellipse(center: start, rx: abs(dx), ry: abs(dy))
+        case .circleDiameter:
+            guard dist > 1e-9 else { return nil }
+            return .circle(center: TSDPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2), radius: dist / 2)
+        case .circleThreePoints:
+            guard pending.count >= 2, let (c, r) = circumcircle(pending[0], pending[1], end) else { return nil }
+            return .circle(center: c, radius: r)
+        case .circleTangent:
+            guard let o = pendingObject, let path = Geometry.path(for: o.shape) else { return nil }
+            let r = Geometry.distance(from: end, to: path)
+            guard r > 1e-6 else { return nil }
+            return .circle(center: end, radius: r)
+        case .lineLength:
+            guard dist > 1e-9, s.lineLength > 0 else { return nil }
+            return .line(start, TSDPoint(x: start.x + dx / dist * s.lineLength, y: start.y + dy / dist * s.lineLength))
+        case .lineAngle:
+            let a = s.lineAngle * .pi / 180
+            let ux = cos(a), uy = sin(a)
+            let t = dx * ux + dy * uy
+            guard abs(t) > 1e-9 else { return nil }
+            return .line(start, TSDPoint(x: start.x + ux * t, y: start.y + uy * t))
+        case .lineTangent:
+            guard let o = pendingObject, let (c, r) = circleOf(o.shape), let hit = pendingHit else { return nil }
+            let d = end.distance(to: c)
+            guard d > r + 1e-9 else { return nil }
+            let base = atan2(end.y - c.y, end.x - c.x), off = acos(r / d)
+            let candidates = [base + off, base - off].map { TSDPoint(x: c.x + r * cos($0), y: c.y + r * sin($0)) }
+            let t = candidates.min { $0.distance(to: hit) < $1.distance(to: hit) }!
+            return .line(t, end)
+        case .polygon:
+            let n = max(3, s.polygonSides)
+            guard dist > 1e-9 else { return nil }
+            let a0 = atan2(dy, dx)
+            return closedPolyline((0..<n).map { i in
+                let a = a0 + 2 * .pi * Double(i) / Double(n)
+                return TSDPoint(x: start.x + dist * cos(a), y: start.y + dist * sin(a))
+            })
+        case .star:
+            let n = max(3, s.starPoints)
+            let ratio = min(0.95, max(0.05, s.starInnerRatio))
+            guard dist > 1e-9 else { return nil }
+            let a0 = atan2(dy, dx)
+            return closedPolyline((0..<(2 * n)).map { i in
+                let a = a0 + .pi * Double(i) / Double(n)
+                let r = i % 2 == 0 ? dist : dist * ratio
+                return TSDPoint(x: start.x + r * cos(a), y: start.y + r * sin(a))
+            })
+        }
+    }
+
     func finishPen(close: Bool) {
         guard let s = state else { return }
         defer { penSegments = []; penOutHandle = nil; host?.canvasNeedsDisplay() }
@@ -853,7 +1099,9 @@ final class CanvasController {
             else if s.tool == .directSelect, !s.selectedAnchors.isEmpty { s.deleteSelectedAnchors() }
             else { s.deleteSelection() }
         case .escape:
-            if s.tool == .pen, !penSegments.isEmpty { finishPen(close: false) } else { s.selection = []; s.selectedAnchors = []; s.tool = .select }
+            if s.tool == .pen, !penSegments.isEmpty { finishPen(close: false) }
+            else if !pending.isEmpty || pendingObject != nil { resetPending() }
+            else { s.selection = []; s.selectedAnchors = []; s.tool = .select }
             host?.toolChanged()
             host?.canvasNeedsDisplay()
         case .returnKey:

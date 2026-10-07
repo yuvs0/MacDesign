@@ -176,6 +176,24 @@ final class DrawingCanvas: UIView, CanvasHost, UIGestureRecognizerDelegate, UICo
         }
     }
 
+    /// No snapshot of the canvas: the menu should just open beside the point pressed.
+    private func emptyPreview(for interaction: UIContextMenuInteraction) -> UITargetedPreview {
+        let anchor = UIView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+        anchor.backgroundColor = .clear
+        let params = UIPreviewParameters()
+        params.backgroundColor = .clear
+        let target = UIPreviewTarget(container: self, center: interaction.location(in: self))
+        return UITargetedPreview(view: anchor, parameters: params, target: target)
+    }
+
+    func contextMenuInteraction(_ interaction: UIContextMenuInteraction, previewForHighlightingMenuWithConfiguration configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
+        emptyPreview(for: interaction)
+    }
+
+    func contextMenuInteraction(_ interaction: UIContextMenuInteraction, previewForDismissingMenuWithConfiguration configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
+        emptyPreview(for: interaction)
+    }
+
     // MARK: Apple Pencil double tap
 
     /// Double tap switches between the Delete tool and the tool in use before it, the way
