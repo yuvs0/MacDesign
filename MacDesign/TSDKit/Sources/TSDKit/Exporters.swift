@@ -60,9 +60,47 @@ public enum SVGExporter {
     static func element(for o: DesignObject, pageHeight h: Double, indent: String) -> String {
         func P(_ p: TSDPoint) -> String { "\(fmt(p.x)),\(fmt(h - p.y))" }
         let stroke = o.style.effectiveStroke.hex
-        let fill = o.style.fillColor?.hex ?? "none"
-        let common = "fill=\"\(fill)\" stroke=\"\(stroke)\" stroke-width=\"\(fmt(o.style.strokeWidth))\""
+        let (fill, defs) = fillPaint(o)
+        var common = "fill=\"\(fill)\""
+        if o.style.isStroked {
+            common += " stroke=\"\(stroke)\" stroke-width=\"\(fmt(o.style.effectiveStrokeWidth))\""
+            #if canImport(CoreGraphics) && canImport(CoreText)
+            let dashes = Renderer.dashPattern(o.style)
+            if !dashes.isEmpty { common += " stroke-dasharray=\"\(dashes.map { fmt(Double($0)) }.joined(separator: " "))\"" }
+            #endif
+        } else {
+            common += " stroke=\"none\""
+        }
         let name = o.name.map { " inkscape:label=\"\(escape($0))\"" } ?? ""
+        let body = shapeElement(o, common: common, name: name, stroke: stroke, pageHeight: h, indent: indent)
+        return defs.isEmpty ? body : "\(indent)<defs>\(defs)</defs>\n" + body
+    }
+
+    /// The SVG paint for an object's fill, plus any gradient or pattern it refers to.
+    static func fillPaint(_ o: DesignObject) -> (String, String) {
+        let id = "f" + o.id.uuidString.prefix(8)
+        switch o.style.fill {
+        case .none:
+            return ("none", "")
+        case .solid(let c):
+            return (c.hex, "")
+        case .gradient(let g):
+            let stops = g.stops.map { "<stop offset=\"\(fmt($0.position))\" stop-color=\"\($0.color.hex)\"/>" }.joined()
+            // SVG's y runs down, so flip the unit-square points.
+            let def = "<linearGradient id=\"\(id)\" x1=\"\(fmt(g.start.x))\" y1=\"\(fmt(1 - g.start.y))\" x2=\"\(fmt(g.end.x))\" y2=\"\(fmt(1 - g.end.y))\">\(stops)</linearGradient>"
+            return ("url(#\(id))", def)
+        case .hatch(let hatch):
+            let s = fmt(hatch.spacing)
+            let cross = hatch.isCrossed ? "<line x1=\"0\" y1=\"0\" x2=\"\(s)\" y2=\"0\" stroke=\"\(hatch.color.hex)\" stroke-width=\"\(fmt(hatch.lineWidth > 0 ? hatch.lineWidth : Style.hairline))\"/>" : ""
+            let def = "<pattern id=\"\(id)\" patternUnits=\"userSpaceOnUse\" width=\"\(s)\" height=\"\(s)\" patternTransform=\"rotate(\(fmt(-hatch.angle)))\"><line x1=\"0\" y1=\"0\" x2=\"0\" y2=\"\(s)\" stroke=\"\(hatch.color.hex)\" stroke-width=\"\(fmt(hatch.lineWidth > 0 ? hatch.lineWidth : Style.hairline))\"/>\(cross)</pattern>"
+            return ("url(#\(id))", def)
+        case .pattern:
+            return (o.style.fill.representativeColor?.hex ?? "none", "")
+        }
+    }
+
+    static func shapeElement(_ o: DesignObject, common: String, name: String, stroke: String, pageHeight h: Double, indent: String) -> String {
+        func P(_ p: TSDPoint) -> String { "\(fmt(p.x)),\(fmt(h - p.y))" }
 
         switch o.shape {
         case .group(let kids):
@@ -73,7 +111,7 @@ public enum SVGExporter {
             let family = "\(escape(t.fontFace)), sans-serif"
             let weight = t.isBold ? " font-weight=\"bold\"" : ""
             let style = t.isItalic ? " font-style=\"italic\"" : ""
-            let color = (o.style.fillColor ?? o.style.effectiveStroke).hex
+            let color = (o.style.fill.representativeColor ?? o.style.effectiveStroke).hex
             let sx = t.scaleX / max(t.scaleY, 1e-9)
             let transform = abs(sx - 1) > 1e-6 ? " transform=\"translate(\(fmt(t.origin.x)) 0) scale(\(fmt(sx)) 1) translate(\(fmt(-t.origin.x)) 0)\"" : ""
             return "\(indent)<text x=\"\(fmt(t.origin.x))\" y=\"\(fmt(h - t.origin.y))\" font-family=\"\(family)\" font-size=\"\(fmt(t.renderedSize))\"\(weight)\(style) fill=\"\(color)\"\(transform)\(name)>\(escape(t.string))</text>\n"

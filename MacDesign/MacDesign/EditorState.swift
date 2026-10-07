@@ -217,7 +217,12 @@ final class EditorState: ObservableObject {
 
     func setStrokeWidth(_ w: Double) {
         if selection.isEmpty { newShapeStyle.strokeWidth = w; return }
-        updateSelected("Change Stroke Width") { $0.style.strokeWidth = max(0.05, w) }
+        updateSelected("Change Stroke Width") { $0.style.strokeWidth = max(0, w) }
+    }
+
+    func setLineType(_ t: LineType) {
+        if selection.isEmpty { newShapeStyle.lineType = t; return }
+        updateSelected("Change Line") { $0.style.lineType = t }
     }
 
     func moveSelection(toLayer index: Int) {

@@ -156,7 +156,7 @@ private struct ObjectRow: View {
             Text(object.displayName)
                 .lineLimit(1)
             Spacer()
-            if let fill = object.style.fillColor {
+            if let fill = object.style.fill.representativeColor {
                 Circle().fill(fill.color).frame(width: 10, height: 10)
                     .overlay(Circle().strokeBorder(Color.primary.opacity(0.2), lineWidth: 0.5))
             }

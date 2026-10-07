@@ -108,23 +108,157 @@ public struct RGB: Equatable, Hashable, Codable, Sendable {
     public static let green = RGB(r: 0, g: 128, b: 0)
 }
 
-/// Stroke and fill. 2D Design only stores the pen colour in a known place; the fill
-/// fields are written into spare bytes of the same block (see docs/FORMAT.md) and
-/// are experimental.
-public struct Style: Equatable, Hashable, Codable, Sendable {
-    /// nil means the object has no explicit pen record in the file (drawn black).
-    public var strokeColor: RGB?
-    public var fillColor: RGB?
-    /// Display and export only; 2D Design maps colours to pens rather than storing widths.
-    public var strokeWidth: Double
+/// Line pattern stored in an object's line block (see docs/FORMAT.md).
+public enum LineType: Int, Codable, Sendable, CaseIterable {
+    case none = 0
+    case solid = 1
+    // 2D Design's three broken patterns. Which is which is a guess from the test file.
+    case dashed = 2
+    case dotted = 3
+    case dashDot = 4
 
-    public init(strokeColor: RGB? = nil, fillColor: RGB? = nil, strokeWidth: Double = 0.25) {
-        self.strokeColor = strokeColor
-        self.fillColor = fillColor
-        self.strokeWidth = strokeWidth
+    public var name: String {
+        switch self {
+        case .none: return "None"
+        case .solid: return "Solid"
+        case .dashed: return "Dashed"
+        case .dotted: return "Dotted"
+        case .dashDot: return "Dash-dot"
+        }
+    }
+}
+
+/// Hatch fill: parallel lines clipped to the shape.
+public struct Hatch: Equatable, Hashable, Codable, Sendable {
+    public var color: RGB
+    /// Line width in mm; 0 is a hairline.
+    public var lineWidth: Double
+    /// Degrees anticlockwise from +x.
+    public var angle: Double
+    /// Distance between lines in mm.
+    public var spacing: Double
+    /// Second set of lines at right angles.
+    public var isCrossed: Bool
+
+    public init(color: RGB = .black, lineWidth: Double = 0, angle: Double = 45, spacing: Double = 4, isCrossed: Bool = false) {
+        self.color = color
+        self.lineWidth = lineWidth
+        self.angle = angle
+        self.spacing = spacing
+        self.isCrossed = isCrossed
+    }
+}
+
+public struct GradientStop: Equatable, Hashable, Codable, Sendable {
+    public var color: RGB
+    /// 0...1 along the gradient.
+    public var position: Double
+
+    public init(color: RGB, position: Double) {
+        self.color = color
+        self.position = position
+    }
+}
+
+/// Linear gradient. Start and end are in the unit square of the shape's bounds (y up).
+public struct Gradient: Equatable, Hashable, Codable, Sendable {
+    public var stops: [GradientStop]
+    public var start: TSDPoint
+    public var end: TSDPoint
+
+    public init(stops: [GradientStop], start: TSDPoint = TSDPoint(x: 0.5, y: 1), end: TSDPoint = TSDPoint(x: 0.5, y: 0)) {
+        self.stops = stops
+        self.start = start
+        self.end = end
+    }
+}
+
+/// Pattern fill. 2D Design keeps a tile (kind 5: a small drawing; kind 4: a character
+/// pattern) and how it repeats. Only the tile shapes are decoded; the rest is kept as is.
+public struct FillPattern: Equatable, Hashable, Codable, Sendable {
+    public var kind: Int
+    public var background: RGB?
+    public var tile: [DesignObject]
+
+    public init(kind: Int, background: RGB? = nil, tile: [DesignObject] = []) {
+        self.kind = kind
+        self.background = background
+        self.tile = tile
+    }
+}
+
+public enum Fill: Equatable, Hashable, Codable, Sendable {
+    case none
+    case solid(RGB)
+    case hatch(Hatch)
+    case gradient(Gradient)
+    case pattern(FillPattern)
+
+    public var name: String {
+        switch self {
+        case .none: return "None"
+        case .solid: return "Solid"
+        case .hatch: return "Hatch"
+        case .gradient: return "Gradient"
+        case .pattern: return "Pattern"
+        }
     }
 
+    /// Hatch, gradient or pattern: fills MacDesign shows and keeps but can't create.
+    public var isPreservedKind: Bool {
+        switch self {
+        case .none, .solid: return false
+        case .hatch, .gradient, .pattern: return true
+        }
+    }
+
+    /// A single colour that stands in for this fill in swatches and simple exports.
+    public var representativeColor: RGB? {
+        switch self {
+        case .none: return nil
+        case .solid(let c): return c
+        case .hatch(let h): return h.color
+        case .gradient(let g): return g.stops.first?.color
+        case .pattern(let p): return p.background ?? RGB(r: 200, g: 200, b: 200)
+        }
+    }
+}
+
+/// Line and fill, as stored in every record's line block and fill block.
+public struct Style: Equatable, Hashable, Codable, Sendable {
+    /// nil is the default colour (black).
+    public var strokeColor: RGB?
+    /// Line width in mm. 0 is 2D Design's default hairline.
+    public var strokeWidth: Double
+    public var lineType: LineType
+    /// Scale of the dash pattern for broken lines (1 in every sample).
+    public var dashScale: Double
+    public var fill: Fill
+
+    public init(strokeColor: RGB? = nil, fillColor: RGB? = nil, strokeWidth: Double = 0.25,
+                lineType: LineType = .solid, fill: Fill? = nil) {
+        self.strokeColor = strokeColor
+        self.strokeWidth = strokeWidth
+        self.lineType = lineType
+        self.dashScale = 1
+        self.fill = fill ?? fillColor.map { .solid($0) } ?? .none
+    }
+
+    /// Solid fill colour. Setting it replaces any other kind of fill.
+    public var fillColor: RGB? {
+        get { if case .solid(let c) = fill { return c } else { return nil } }
+        set { fill = newValue.map { .solid($0) } ?? .none }
+    }
+
+    public var isFilled: Bool { fill != .none }
+    public var isStroked: Bool { lineType != .none }
+
     public var effectiveStroke: RGB { strokeColor ?? .black }
+
+    /// Width a hairline (stored width 0) is drawn at, in mm.
+    public static let hairline = 0.18
+
+    public var effectiveStrokeWidth: Double { strokeWidth > 0 ? strokeWidth : Style.hairline }
 }
 
 public enum PathSegment: Equatable, Hashable, Codable, Sendable {
@@ -178,9 +312,12 @@ public struct TextData: Equatable, Hashable, Codable, Sendable {
     /// unedited text round-trips exactly. nil for text created here.
     public var rawLogFont: Data?
     public var rawFontTail: Data?
-    /// Pen blocks of the font and glyph sub-records as read (17 bytes or empty).
+    /// Line and fill blocks of the font and glyph sub-records as read.
     public var rawFontStyle: Data?
     public var rawGlyphStyle: Data?
+    /// The three bytes between the text's second point and its font record (zero, or
+    /// 01 00 01 for the label of a dimension). Meaning unknown; preserved.
+    public var rawFlags: Data?
     /// Pen position of each non-space character as stored in the file. nil until read, or
     /// after an edit that changes the characters; the writer then measures the font itself.
     public var rawGlyphPositions: [TSDPoint]?
@@ -260,16 +397,23 @@ public struct DesignObject: Identifiable, Equatable, Hashable, Codable, Sendable
     public var isLocked: Bool
     public var style: Style
     public var shape: Shape
-    /// Original record type for lines (0x05) and circles (0x06); preserved on round trip.
+    /// Record type as read (see Record.Kind). Arcs, Bézier curves, dimensions and arrows keep
+    /// their type while unchanged; once edited they are saved as paths or groups.
     public var recordType: UInt16?
     /// Bytes that preceded this record in the file (an unexplained 04 00 seen before point records).
     public var prefixBytes: Data
-    /// The 12 header bytes after the pen block, kept verbatim apart from the layer field.
+    /// The 14 header bytes after the object number (6 zero, 8 FF in every file), and the two
+    /// strings that follow (";" in every file).
     public var rawHeader: Data?
-    /// The 17-byte pen block as read, and the style decoded from it, so an unchanged
-    /// style is written back exactly.
+    public var rawNames: [String]?
+    /// Line and fill blocks as read, and the style decoded from them, so an unchanged
+    /// line or fill is written back exactly.
     public var rawStyle: Data?
+    public var rawFill: Data?
     public var loadedStyle: Style?
+    /// The record body as read, written back verbatim while shape, layer, number and style
+    /// are unchanged.
+    public var rawBody: RawBody?
     /// For circles: the point on the circumference the file stored (2D Design keeps the
     /// point the user clicked). Kept so unchanged circles round-trip exactly.
     public var rawCirclePoint: TSDPoint?
@@ -291,7 +435,27 @@ public struct DesignObject: Identifiable, Equatable, Hashable, Codable, Sendable
         self.rawHeader = rawHeader
     }
 
-    public var displayName: String { name ?? shape.kindName }
+    public var displayName: String {
+        if let name { return name }
+        switch recordType {
+        case Record.Kind.dimension.rawValue?: return "Dimension"
+        case Record.Kind.arrow.rawValue?: return "Arrow"
+        default: return shape.kindName
+        }
+    }
+}
+
+/// A record body kept verbatim, with what it was read alongside.
+public struct RawBody: Equatable, Hashable, Codable, Sendable {
+    public var data: Data
+    public var shape: Shape
+    public var layer: Int
+    public var fileID: UInt16
+    public var style: Style
+
+    public func matches(_ o: DesignObject) -> Bool {
+        o.shape == shape && o.layer == layer && o.fileID == fileID && o.style == style
+    }
 }
 
 public struct Layer: Identifiable, Equatable, Hashable, Codable, Sendable {

@@ -87,7 +87,7 @@ struct PropertiesPanel: View {
     // Selection
 
     private var objectSection: some View {
-        Section(selected.count == 1 ? single!.shape.kindName : "\(selected.count) objects") {
+        Section(selected.count == 1 ? single!.displayName : "\(selected.count) objects") {
             if let o = single {
                 TextField("Name", text: Binding(
                     get: { o.name ?? "" },
@@ -121,6 +121,14 @@ struct PropertiesPanel: View {
                 }
             }
             fillRow(fill: single?.style.fillColor ?? selected.first?.style.fillColor) { state.setFill($0) }
+            if let fill = (single ?? selected.first)?.style.fill, fill.isPreservedKind {
+                LabeledContent("Fill type", value: fill.name)
+                    .help("Kept as it was in the file. Choosing a fill colour replaces it.")
+            }
+            Picker("Line", selection: Binding(get: { (single ?? selected.first)?.style.lineType ?? .solid },
+                                              set: { state.setLineType($0) })) {
+                ForEach(LineType.allCases, id: \.self) { Text($0.name).tag($0) }
+            }
             HStack {
                 Text("Stroke width")
                 Spacer()
@@ -130,6 +138,7 @@ struct PropertiesPanel: View {
                     .multilineTextAlignment(.trailing)
                 Text("mm").foregroundStyle(.secondary)
             }
+            .help("0 is a hairline.")
         }
     }
 

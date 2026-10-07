@@ -86,11 +86,21 @@ func describe(_ o: DesignObject, indent: String = "  ") {
     case .rect(let r): extra = "\(fmt(r.width)) x \(fmt(r.height)) at (\(fmt(r.minX)), \(fmt(r.minY)))"
     case .ellipse(let c, let rx, let ry): extra = "centre (\(fmt(c.x)), \(fmt(c.y))) rx \(fmt(rx)) ry \(fmt(ry))"
     case .path(let p): extra = "\(p.segments.count) segments\(p.isClosed ? ", closed" : "")"
+    case .arc(let c, let rx, _, let a0, let a1): extra = "centre (\(fmt(c.x)), \(fmt(c.y))) r \(fmt(rx)) from \(fmt(a0))° to \(fmt(a1))°"
     default: break
     }
     let stroke = o.style.strokeColor?.hex ?? "default"
-    let fill = o.style.fillColor.map { " fill \($0.hex)" } ?? ""
-    print("\(indent)#\(o.fileID) \(o.shape.kindName) layer \(o.layer) stroke \(stroke)\(fill) \(extra)")
+    var fill = ""
+    switch o.style.fill {
+    case .none: break
+    case .solid(let c): fill = " fill \(c.hex)"
+    case .hatch(let h): fill = " hatch \(h.color.hex) \(fmt(h.angle))° every \(fmt(h.spacing))mm\(h.isCrossed ? " crossed" : "")"
+    case .gradient(let g): fill = " gradient " + g.stops.map { "\($0.color.hex)@\(fmt($0.position))" }.joined(separator: " ")
+    case .pattern(let p): fill = " pattern kind \(p.kind)\(p.tile.isEmpty ? "" : " (\(p.tile.count) tile shapes)")"
+    }
+    if o.style.lineType != .solid { fill += " line \(o.style.lineType.name)" }
+    if o.style.strokeWidth > 0 { fill += " width \(fmt(o.style.strokeWidth))mm" }
+    print("\(indent)#\(o.fileID) \(o.displayName) layer \(o.layer) stroke \(stroke)\(fill) \(extra)")
     if case .group(let kids) = o.shape { for k in kids { describe(k, indent: indent + "    ") } }
 }
 

@@ -297,8 +297,8 @@ final class DrawingCanvas: NSView {
         default:
             guard let path = Renderer.cgPath(for: o.shape) else { return false }
             let cg = CGPoint(x: p.x, y: p.y)
-            if o.style.fillColor != nil, path.contains(cg, using: .evenOdd) { return true }
-            let stroked = path.copy(strokingWithWidth: 2 * tol + o.style.strokeWidth, lineCap: .round, lineJoin: .round, miterLimit: 2)
+            if o.style.isFilled, path.contains(cg, using: .evenOdd) { return true }
+            let stroked = path.copy(strokingWithWidth: 2 * tol + o.style.effectiveStrokeWidth, lineCap: .round, lineJoin: .round, miterLimit: 2)
             return stroked.contains(cg)
         }
     }

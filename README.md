@@ -38,8 +38,8 @@ swift run tsdconv --format svg -o ~/Desktop/out ~/Downloads/  # whole folder
   Enter or Esc to finish.
 - **Select**: click, Shift-click, or drag a marquee. Drag to move, drag the handles to
   resize (Shift keeps proportions), arrow keys nudge 1 mm (Shift: 10 mm), Delete removes.
-- **Inspector** (⌥⌘I): stroke and fill colours, stroke width, position and size, layer,
-  text string, font, size, bold and italic.
+- **Inspector** (⌥⌘I): stroke and fill colours, line type, stroke width (0 is a hairline),
+  position and size, layer, text string, font, size, bold and italic.
 - **Layers** tab: visibility and lock per layer and per object, drag objects to reorder,
   arrows to reorder layers, double-click a layer name to rename, `+` / `−` to add or
   delete layers. The active layer receives new shapes.
@@ -49,10 +49,31 @@ swift run tsdconv --format svg -o ~/Desktop/out ~/Downloads/  # whole folder
 
 ## What the file writer keeps
 
-A file opened and saved without changes is byte-identical. Unknown bytes are preserved.
-Two things are written into bytes we have not seen 2D Design use (see `docs/FORMAT.md`):
-the layer an object sits on, and fill colours. Check such files in 2D Design before
-relying on them, and send a 2D Design-made example to confirm the layout.
+A file opened and saved without changes is byte-identical, and any record you don't edit
+is written back exactly as it was read. Layers, line types, widths, colours and solid
+fills are stored where 2D Design stores them (see `docs/FORMAT.md`).
+
+Hatch, gradient and pattern fills, arcs, curves, dimensions and arrows are read and drawn.
+MacDesign can't create the fills itself; choosing a fill colour replaces them. An edited
+dimension or arrow is saved as a group of the lines and text it shows. Pattern fills are
+drawn as a light cross-hatch, because the way their tile repeats isn't decoded yet.
+
+Shapes saved by MacDesign builds before October 2026 had their stroke colour written as
+a solid fill, and will open filled.
 
 Fonts named in a file are used when installed; otherwise text is shown in the system
 font and the inspector says so.
+
+## Quick Look
+
+The app carries Quick Look extensions, so Finder shows thumbnails of `.3vs` and `.tsd`
+files and Space previews them. They register when the app is first launched. If they
+don't appear:
+
+1. Open the app once from its build location, then check **System Settings > General >
+   Login Items & Extensions > Quick Look** and turn on MacDesign Preview and MacDesign
+   Thumbnails.
+2. If macOS asks whether the extensions may access data from other apps, allow it. A
+   build signed differently from the last one triggers this, and Quick Look waits on it
+   silently (Finder shows a spinner).
+3. Run `qlmanage -r` and `qlmanage -r cache`, then try again.

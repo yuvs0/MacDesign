@@ -53,92 +53,138 @@ public enum TSDWriter {
         }
     }
 
-    // MARK: Header
+    // MARK: Line and fill blocks
 
-    static func styleBlock(for o: DesignObject) -> Data {
-        if let raw = o.rawStyle, raw.count == Record.styleLength, o.loadedStyle == o.style {
-            return raw
-        }
-        return styleBlock(stroke: o.style.strokeColor, fill: o.style.fillColor)
+    static func sameLine(_ a: Style, _ b: Style) -> Bool {
+        a.strokeColor == b.strokeColor && a.strokeWidth == b.strokeWidth && a.lineType == b.lineType && a.dashScale == b.dashScale
     }
 
-    static func styleBlock(stroke: RGB?, fill: RGB?) -> Data {
-        guard stroke != nil || fill != nil else { return Data() }
+    static func lineBlock(for o: DesignObject) -> Data {
+        if let raw = o.rawStyle, let loaded = o.loadedStyle, sameLine(loaded, o.style) { return raw }
+        return lineBlock(o.style)
+    }
+
+    static func lineBlock(_ s: Style) -> Data {
         var w = BinaryWriter()
+        w.bytes(Record.lineTag)
+        w.u16(UInt16(s.lineType.rawValue))
+        switch s.lineType {
+        case .none:
+            break
+        case .solid:
+            w.f64(s.strokeWidth)
+            w.u32(s.effectiveStroke.colorref)
+        default:
+            w.u16(0)
+            w.f64(s.dashScale)
+            w.f64(s.strokeWidth)
+            w.u32(s.effectiveStroke.colorref)
+        }
+        return w.data
+    }
+
+    static func fillBlock(for o: DesignObject) -> Data {
+        if let raw = o.rawFill, let loaded = o.loadedStyle, loaded.fill == o.style.fill { return raw }
+        return fillBlock(o.style.fill)
+    }
+
+    /// Only none and solid are written from scratch. Hatches, gradients and patterns are
+    /// only ever kept from the file, so anything else is saved as its nearest solid colour.
+    static func fillBlock(_ fill: Fill) -> Data {
+        var w = BinaryWriter()
+        w.bytes(Record.fillTag)
+        guard let c = fill.representativeColor else {
+            w.u16(0)
+            return w.data
+        }
+        w.u16(1)
         w.bytes([0x01, 0x00])
-        w.u32((stroke ?? .black).colorref)
-        w.u32((fill ?? .black).colorref)
-        w.u32(fill == nil ? 0 : 1)
+        w.u32(c.colorref)
+        w.u32(0)
+        w.u32(0)
         w.bytes([0x01, 0x00, 0x00])
         return w.data
     }
 
-    static func writeHeader(_ w: inout BinaryWriter, kind: UInt16, fileID: UInt16, hdr12: Data?, layer: Int, firstLayer: Int, style: Data) {
-        w.u16(kind)
-        w.bytes(Record.tagObject)
+    // MARK: Header
+
+    /// Pass kind nil for an untyped record (one whose type its parent implies).
+    static func writeHeader(_ w: inout BinaryWriter, kind: UInt16?, layer: Int, fileID: UInt16, tail: Data?, names: [String]?) {
+        if let kind { w.u16(kind) }
+        w.bytes(Record.schema)
+        w.u16(UInt16(truncatingIfNeeded: layer))
         w.u16(fileID)
-        w.zeros(6)
-        w.bytes(Record.headerFF)
-        w.bytes(Record.semicolon)
-        w.bytes(Record.semicolon)
-        w.bytes(Record.tagObject)
-        var h = (hdr12?.count == 12) ? [UInt8](hdr12!) : [UInt8](repeating: 0, count: 12)
-        // Layer reference (see FORMAT.md: unverified against 2D Design itself).
-        let v = layer == firstLayer ? 0 : layer
-        h[0] = UInt8(v & 0xFF)
-        h[1] = UInt8((v >> 8) & 0xFF)
-        w.bytes(h)
-        w.bytes(Record.penTag)
-        if style.count == Record.styleLength {
-            w.u16(1)
-            w.bytes(style)
-        } else {
-            w.u16(0)
-        }
+        w.bytes(tail?.count == 14 ? tail! : Data(Record.headerTail))
+        w.u8(0)
+        let n = names?.count == 2 ? names! : [";", ";"]
+        w.cString(n[0])
+        w.cString(n[1])
     }
 
     // MARK: Records
 
-    static func writeRecord(_ w: inout BinaryWriter, _ o: DesignObject, doc: TSDDocument, ids: inout IDAllocator, inheritedID: UInt16?) {
-        let firstLayer = doc.layers.first?.index ?? 1
+    static func writeRecord(_ w: inout BinaryWriter, _ o: DesignObject, doc: TSDDocument, ids: inout IDAllocator,
+                            inheritedID: UInt16?, inheritedLayer: Int? = nil) {
         let fileID = inheritedID ?? (o.fileID == 0 ? ids.take() : o.fileID)
-        let style = styleBlock(for: o)
+        let layer = inheritedLayer ?? o.layer
+        var obj = o
+        obj.fileID = fileID
+        obj.layer = layer
 
-        func header(_ kind: Record.Kind, style: Data) {
-            writeHeader(&w, kind: kind.rawValue, fileID: fileID, hdr12: o.rawHeader, layer: o.layer, firstLayer: firstLayer, style: style)
+        func header(_ kind: Record.Kind) {
+            writeHeader(&w, kind: kind.rawValue, layer: layer, fileID: fileID, tail: o.rawHeader, names: o.rawNames)
+            w.bytes(lineBlock(for: o))
+            w.bytes(fillBlock(for: o))
+        }
+
+        // Unchanged: write the body exactly as it was read.
+        if let raw = o.rawBody, raw.matches(obj), let type = o.recordType, let kind = Record.Kind(rawValue: type) {
+            header(kind)
+            w.bytes(raw.data)
+            return
         }
 
         switch o.shape {
         case .line(let a, let b):
-            header(.line, style: style)
+            header(.line)
             w.bytes([0x01, 0x00])
             w.f64(a.x); w.f64(a.y); w.f64(b.x); w.f64(b.y)
 
         case .circle(let c, let r):
-            header(.circle, style: style)
+            header(.circle)
             w.bytes([0x01, 0x00])
             var p = TSDPoint(x: c.x + r, y: c.y)
             if let raw = o.rawCirclePoint, abs(c.distance(to: raw) - r) < 1e-6 { p = raw }
             w.f64(c.x); w.f64(c.y); w.f64(p.x); w.f64(p.y)
             w.u8(0)
 
+        case .arc(let c, let rx, let ry, let a0, let a1) where o.recordType == Record.Kind.arc.rawValue && abs(rx - ry) < 1e-9:
+            // Native arc, anticlockwise from start to end.
+            header(.arc)
+            w.bytes([0x01, 0x00])
+            let s = TSDPoint(x: c.x + rx * cos(a0 * .pi / 180), y: c.y + rx * sin(a0 * .pi / 180))
+            let e = TSDPoint(x: c.x + rx * cos(a1 * .pi / 180), y: c.y + rx * sin(a1 * .pi / 180))
+            w.f64(c.x); w.f64(c.y); w.f64(s.x); w.f64(s.y); w.f64(e.x); w.f64(e.y)
+            w.bytes([0x00, 0x00, 0x00])
+
         case .point(let p):
-            header(.point, style: style)
+            header(.point)
             w.f64(p.x); w.f64(p.y)
             w.u8(1)
 
         case .group(let kids):
-            header(.group, style: style)
-            w.bytes([0x04, 0x00, 0x00, 0x00, 0x03, 0x00])
+            // Edited dimensions and arrows are saved as plain groups of what they show.
+            header(.group)
+            w.bytes(Record.groupTag)
             w.u32(UInt32(kids.count))
-            for k in kids { writeRecord(&w, k, doc: doc, ids: &ids, inheritedID: fileID) }
+            for k in kids { writeRecord(&w, k, doc: doc, ids: &ids, inheritedID: fileID, inheritedLayer: layer) }
 
         case .text(let t):
-            header(.text, style: style)
-            writeText(&w, t, object: o, fileID: fileID, firstLayer: firstLayer, style: style)
+            header(.text)
+            writeText(&w, t, object: obj)
 
         case .path, .rect, .ellipse, .arc:
-            header(.path, style: style)
+            header(.path)
             let path = Geometry.path(for: o.shape) ?? PathData(segments: [], isClosed: false)
             writePath(&w, path)
         }
@@ -160,7 +206,7 @@ public enum TSDWriter {
         if path.isClosed, let s = start, let last = verts.last, !Geometry.near(s, last.0) {
             verts.append((s, 1))
         }
-        w.bytes(Record.tagObject)
+        w.bytes(Record.pathTag)
         w.u32(UInt32(verts.count))
         for (p, flag) in verts {
             w.bytes([0x03, 0x00])
@@ -171,7 +217,7 @@ public enum TSDWriter {
 
     // MARK: Text
 
-    static func writeText(_ w: inout BinaryWriter, _ t: TextData, object: DesignObject, fileID: UInt16, firstLayer: Int, style: Data) {
+    static func writeText(_ w: inout BinaryWriter, _ t: TextData, object o: DesignObject) {
         w.bytes([0x04, 0x00, 0x00, 0x00])
         w.cString(t.string)
         w.f64(t.origin.x); w.f64(t.origin.y)
@@ -179,15 +225,21 @@ public enum TSDWriter {
         w.bytes([0x00, 0x00])
         w.f64(t.scaleY)
         w.f64(t.anchor.x); w.f64(t.anchor.y)
-        w.u8(0)
+        w.bytes(t.rawFlags?.count == 3 ? t.rawFlags! : Data([0, 0, 0]))
 
         let logFont = t.rawLogFont?.count == Record.logFontLength ? t.rawLogFont! : makeLogFont(t)
         let tail = t.rawFontTail?.count == Record.fontTailLength ? t.rawFontTail! : makeFontTail(t)
-        let fontStyle = t.rawFontStyle ?? style
-        let glyphStyle = t.rawGlyphStyle ?? style
+        // Glyphs are filled shapes: the text's fill, or its line colour when it has none.
+        var glyph = o.style
+        if glyph.fill == .none { glyph.fill = .solid(glyph.effectiveStroke) }
+        let fresh = lineBlock(glyph) + fillBlock(glyph.fill)
+        let styleUnchanged = o.loadedStyle == o.style
+        let fontStyle = styleUnchanged ? (t.rawFontStyle ?? fresh) : fresh
+        let glyphStyle = styleUnchanged ? (t.rawGlyphStyle ?? fresh) : fresh
 
-        // Font sub-record.
-        writeHeader(&w, kind: Record.Kind.font.rawValue, fileID: fileID, hdr12: object.rawHeader, layer: object.layer, firstLayer: firstLayer, style: fontStyle)
+        // Font sub-record (untyped).
+        writeHeader(&w, kind: nil, layer: o.layer, fileID: o.fileID, tail: o.rawHeader, names: o.rawNames)
+        w.bytes(fontStyle)
         writeGlyphBody(&w, char: 0, position: .zero, logFont: logFont, tail: tail)
 
         // One glyph record per non-space character, each at its pen position.
@@ -202,7 +254,8 @@ public enum TSDWriter {
         w.bytes([0x03, 0x00])
         w.u32(UInt32(glyphs.count))
         for (ch, pos) in zip(glyphs, positions) {
-            writeHeader(&w, kind: Record.Kind.glyph.rawValue, fileID: fileID, hdr12: object.rawHeader, layer: object.layer, firstLayer: firstLayer, style: glyphStyle)
+            writeHeader(&w, kind: Record.Kind.glyph.rawValue, layer: o.layer, fileID: o.fileID, tail: o.rawHeader, names: o.rawNames)
+            w.bytes(glyphStyle)
             writeGlyphBody(&w, char: ch, position: pos, logFont: logFont, tail: tail)
         }
         w.bytes([0x00, 0x00])

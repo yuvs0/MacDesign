@@ -14,3 +14,5 @@ dev-test.command
 dev-test.log
 dev-app.command
 dev-app.log
+dev-ql.command
+dev-ql.log

@@ -42,15 +42,90 @@ public enum Renderer {
             ctx.fillEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r))
         default:
             guard let path = cgPath(for: o.shape) else { return }
-            if let fill = o.style.fillColor {
-                ctx.setFillColor(cgColor(fill))
-                ctx.addPath(path)
-                ctx.fillPath(using: .evenOdd)
-            }
+            drawFill(o.style.fill, path: path, in: ctx, options: options)
+            guard o.style.isStroked else { return }
+            ctx.saveGState()
             ctx.setStrokeColor(cgColor(options.strokeOverride ?? o.style.effectiveStroke))
-            ctx.setLineWidth(max(o.style.strokeWidth, options.minimumStrokeWidth))
+            ctx.setLineWidth(max(o.style.effectiveStrokeWidth, options.minimumStrokeWidth))
+            let dashes = dashPattern(o.style)
+            if !dashes.isEmpty { ctx.setLineDash(phase: 0, lengths: dashes) }
             ctx.addPath(path)
             ctx.strokePath()
+            ctx.restoreGState()
+        }
+    }
+
+    /// Dash lengths in mm for broken line types.
+    public static func dashPattern(_ s: Style) -> [CGFloat] {
+        let k = CGFloat(s.dashScale > 0 ? s.dashScale : 1)
+        switch s.lineType {
+        case .none, .solid: return []
+        case .dashed: return [3 * k, 1.5 * k]
+        case .dotted: return [0.01, 1 * k]
+        case .dashDot: return [3 * k, 1 * k, 0.01, 1 * k]
+        }
+    }
+
+    static func drawFill(_ fill: Fill, path: CGPath, in ctx: CGContext, options: Options) {
+        switch fill {
+        case .none:
+            return
+        case .solid(let c):
+            ctx.setFillColor(cgColor(c))
+            ctx.addPath(path)
+            ctx.fillPath(using: .evenOdd)
+        case .hatch(let h):
+            ctx.saveGState()
+            ctx.addPath(path)
+            ctx.clip(using: .evenOdd)
+            hatchLines(path.boundingBoxOfPath, angle: h.angle, spacing: h.spacing, in: ctx)
+            if h.isCrossed { hatchLines(path.boundingBoxOfPath, angle: h.angle + 90, spacing: h.spacing, in: ctx) }
+            ctx.setStrokeColor(cgColor(h.color))
+            ctx.setLineWidth(max(h.lineWidth > 0 ? h.lineWidth : Style.hairline, options.minimumStrokeWidth))
+            ctx.strokePath()
+            ctx.restoreGState()
+        case .gradient(let g):
+            guard g.stops.count >= 1 else { return }
+            let colors = g.stops.map { cgColor($0.color) } as CFArray
+            var locations = g.stops.map { CGFloat($0.position) }
+            guard let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: colors, locations: &locations) else { return }
+            let box = path.boundingBoxOfPath
+            func unit(_ p: TSDPoint) -> CGPoint { CGPoint(x: box.minX + p.x * box.width, y: box.minY + p.y * box.height) }
+            ctx.saveGState()
+            ctx.addPath(path)
+            ctx.clip(using: .evenOdd)
+            ctx.drawLinearGradient(gradient, start: unit(g.start), end: unit(g.end), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+            ctx.restoreGState()
+        case .pattern(let p):
+            // The tile's repeat isn't decoded yet: show the background with a light
+            // cross-hatch so the shape reads as pattern-filled.
+            ctx.saveGState()
+            ctx.addPath(path)
+            ctx.clip(using: .evenOdd)
+            ctx.setFillColor(cgColor(p.background ?? .white))
+            ctx.fill(path.boundingBoxOfPath)
+            hatchLines(path.boundingBoxOfPath, angle: 45, spacing: 1.2, in: ctx)
+            hatchLines(path.boundingBoxOfPath, angle: -45, spacing: 1.2, in: ctx)
+            ctx.setStrokeColor(CGColor(gray: 0.6, alpha: 1))
+            ctx.setLineWidth(max(0.12, options.minimumStrokeWidth))
+            ctx.strokePath()
+            ctx.restoreGState()
+        }
+    }
+
+    /// Adds parallel lines covering `box` to the current path.
+    static func hatchLines(_ box: CGRect, angle: Double, spacing: Double, in ctx: CGContext) {
+        let step = CGFloat(max(spacing, 0.2))
+        let r = angle * .pi / 180
+        let dir = CGPoint(x: cos(r), y: sin(r)), normal = CGPoint(x: -sin(r), y: cos(r))
+        let c = CGPoint(x: box.midX, y: box.midY)
+        let half = (box.width * box.width + box.height * box.height).squareRoot() / 2 + step
+        var d = -half
+        while d <= half {
+            let o = CGPoint(x: c.x + normal.x * d, y: c.y + normal.y * d)
+            ctx.move(to: CGPoint(x: o.x - dir.x * half, y: o.y - dir.y * half))
+            ctx.addLine(to: CGPoint(x: o.x + dir.x * half, y: o.y + dir.y * half))
+            d += step
         }
     }
 
@@ -206,7 +281,7 @@ public enum Renderer {
 
     static func drawText(_ t: TextData, style: Style, in ctx: CGContext, options: Options) {
         let path = textPath(t)
-        ctx.setFillColor(cgColor(options.strokeOverride ?? style.fillColor ?? style.effectiveStroke))
+        ctx.setFillColor(cgColor(options.strokeOverride ?? style.fill.representativeColor ?? style.effectiveStroke))
         ctx.addPath(path)
         ctx.fillPath()
     }

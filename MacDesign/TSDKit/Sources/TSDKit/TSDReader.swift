@@ -4,30 +4,41 @@ import Foundation
 enum Record {
     static let signature = "tsdtdv3"
 
-    static let tagObject: [UInt8] = [0x03, 0x00, 0x01, 0x00]
-    static let headerFF: [UInt8] = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00]
+    /// Starts every object header (after the record type, which typeless records omit).
+    static let schema: [UInt8] = [0x03, 0x00]
+    /// Starts a path's vertex list.
+    static let pathTag: [UInt8] = [0x03, 0x00, 0x01, 0x00]
     static let semicolon: [UInt8] = [0xFF, 0xFE, 0xFF, 0x01, 0x3B, 0x00]
-    static let penTag: [UInt8] = [0x05, 0x00]
+    static let lineTag: [UInt8] = [0x03, 0x00]
+    static let fillTag: [UInt8] = [0x05, 0x00]
+    static let groupTag: [UInt8] = [0x04, 0x00, 0x00, 0x00, 0x03, 0x00]
     static let layerEntryStart: [UInt8] = [0x01, 0x00, 0x03, 0x00, 0xFF, 0xFE, 0xFF]
     /// The settings area between the layer table and the objects always starts with this.
     static let middleStart: [UInt8] = [0x02, 0x00, 0x00, 0x01, 0x01, 0x00, 0x0E, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00]
     /// ...and ends with this, just before the object count.
     static let middleEnd: [UInt8] = [0x19, 0x00, 0x09, 0x00, 0x00, 0x00, 0x03, 0x00]
+    /// The 14 header bytes after the object number in every file seen.
+    static let headerTail: [UInt8] = [0, 0, 0, 0, 0, 0] + [UInt8](repeating: 0xFF, count: 8)
 
     enum Kind: UInt16 {
         case font = 0x00
         case point = 0x02
         case line = 0x05
         case circle = 0x06
+        case arc = 0x07
+        case bezier = 0x08
         case path = 0x09
         case group = 0x0A
         case glyph = 0x0B
         case text = 0x0C
+        case dimension = 0x0D
+        /// Group-like container; seen holding the tile of a pattern fill.
+        case container = 0x0E
+        case arrow = 0x17
     }
 
     static let logFontLength = 92
     static let fontTailLength = 90
-    static let styleLength = 17
 }
 
 /// Structured reader for 2D Design V3 files. Walks the layer table and the object list
@@ -108,10 +119,10 @@ public enum TSDReader {
         for _ in 0..<objectCount {
             var prefixBytes = Data()
             // An unexplained 04 00 precedes point records in the samples.
-            if r.peek([0x04, 0x00], at: r.offset), r.peek(Record.tagObject, at: r.offset + 4) {
+            if r.peek([0x04, 0x00], at: r.offset), r.peek(Record.schema, at: r.offset + 4) {
                 prefixBytes = try r.readBytes(2)
             }
-            var o = try readRecord(&r, layers: layers)
+            var o = try readTypedObject(&r)
             o.prefixBytes = prefixBytes
             objects.append(o)
         }
@@ -156,70 +167,187 @@ public enum TSDReader {
     }
 
     // MARK: Records
+    //
+    // Every object is: [type] header, line block, fill block, body. Objects embedded in
+    // another record (a text's font, a dimension's label, an arrow's polyline, the tile of
+    // a character pattern) leave out the type, which their parent implies.
 
     struct Header {
-        var kind: UInt16
+        var layer: UInt16
         var fileID: UInt16
-        var hdr12: Data
-        var style: Data   // 17 bytes or empty
+        var tail: Data
+        var names: [String]
     }
 
     static func readHeader(_ r: inout BinaryReader) throws -> Header {
-        let start = r.offset
-        let kind = try r.readU16()
-        try r.expect(Record.tagObject, "object tag")
+        try r.expect(Record.schema, "object header")
+        let layer = try r.readU16()
         let id = try r.readU16()
-        try r.expect([UInt8](repeating: 0, count: 6), "header padding")
-        try r.expect(Record.headerFF, "header padding")
-        try r.expect(Record.semicolon, "separator")
-        try r.expect(Record.semicolon, "separator")
-        try r.expect(Record.tagObject, "object tag")
-        let hdr12 = try r.readBytes(12)
-        try r.expect(Record.penTag, "pen tag")
-        let hasStyle = try r.readU16()
-        var style = Data()
-        if hasStyle == 1 {
-            style = try r.readBytes(Record.styleLength)
-        } else if hasStyle != 0 {
-            throw TSDError.unexpected("pen block", at: start)
-        }
-        return Header(kind: kind, fileID: id, hdr12: hdr12, style: style)
+        let tail = try r.readBytes(14)
+        try r.expect([0x00], "object header")
+        let n1 = try r.readCString()
+        let n2 = try r.readCString()
+        return Header(layer: layer, fileID: id, tail: tail, names: [n1, n2])
     }
 
-    static func parseStyle(_ block: Data) -> Style {
-        guard block.count == Record.styleLength else { return Style() }
-        let b = [UInt8](block)
-        func u32(_ o: Int) -> UInt32 {
-            UInt32(b[o]) | (UInt32(b[o + 1]) << 8) | (UInt32(b[o + 2]) << 16) | (UInt32(b[o + 3]) << 24)
+    struct LineBlock {
+        var type: UInt16
+        var width: Double
+        var color: RGB
+        var scale: Double
+        var raw: Data
+    }
+
+    /// `03 00`, line type, then (type 1) width and colour, or (types 2+) a pattern word and
+    /// scale before them. Type 0 is no line.
+    static func readLine(_ r: inout BinaryReader) throws -> LineBlock {
+        let start = r.offset
+        try r.expect(Record.lineTag, "line style")
+        let type = try r.readU16()
+        var width = 0.0, color: UInt32 = 0, scale = 1.0
+        switch type {
+        case 0:
+            break
+        case 1:
+            width = try r.readF64()
+            color = try r.readU32()
+        default:
+            _ = try r.readU16()
+            scale = try r.readF64()
+            width = try r.readF64()
+            color = try r.readU32()
         }
-        var s = Style(strokeColor: RGB(colorref: u32(2)))
-        let fill = u32(6), flags = u32(10)
-        if flags & 1 == 1 { s.fillColor = RGB(colorref: fill) }
+        return LineBlock(type: type, width: width, color: RGB(colorref: color), scale: scale,
+                         raw: Data(r.bytes[start..<r.offset]))
+    }
+
+    static func readF32(_ r: inout BinaryReader) throws -> Double {
+        Double(Float(bitPattern: try r.readU32()))
+    }
+
+    static func readMatrix(_ r: inout BinaryReader) throws -> [Double] {
+        try r.expect([0x01, 0x00], "transform")
+        return try (0..<6).map { _ in try r.readF64() }
+    }
+
+    /// True where a transform (01 00 + matrix) followed by 01 00 01 00 starts: the end of a
+    /// character pattern, whose own layout isn't decoded.
+    static func isPatternTail(_ r: BinaryReader, at o: Int) -> Bool {
+        guard r.u16(o) == 1, r.peek([0x01, 0x00, 0x01, 0x00], at: o + 50) else { return false }
+        var m: [Double] = []
+        for k in 0..<6 {
+            guard let v = r.f64(o + 2 + 8 * k), v.isFinite, abs(v) < 1e6 else { return false }
+            m.append(v)
+        }
+        return abs(m[0] * m[3] - m[1] * m[2]) > 1e-9
+    }
+
+    /// `05 00`, fill type, then a body that depends on the type: 0 none, 1 solid,
+    /// 2 hatch, 3 gradient, 4 character pattern, 5 pattern drawn from shapes.
+    static func readFill(_ r: inout BinaryReader) throws -> (Fill, Data) {
+        let start = r.offset
+        try r.expect(Record.fillTag, "fill")
+        let type = try r.readU16()
+        var fill = Fill.none
+        switch type {
+        case 0:
+            break
+        case 1:
+            try r.expect([0x01, 0x00], "solid fill")
+            let c = try r.readU32()
+            _ = try r.readBytes(11)
+            fill = .solid(RGB(colorref: c))
+        default:
+            _ = try r.readU16()
+            if try r.readU8() != 0 { _ = try r.readBytes(4) }
+            _ = try readMatrix(&r)
+            if type == 2 {
+                let line = try readLine(&r)
+                let scale = try r.readF64(), spacing = try r.readF64(), angle = try r.readF64()
+                let flags = try r.readBytes(2)
+                let dashes = try r.readU16()
+                _ = try r.readBytes(16 * Int(dashes))
+                // Spacing appears to be in tenths of a millimetre (40 in the test file).
+                fill = .hatch(Hatch(color: line.color, lineWidth: line.width, angle: angle,
+                                    spacing: max(0.2, spacing * (scale > 0 ? scale : 1) / 10),
+                                    isCrossed: flags.first == 1))
+            } else {
+                _ = try r.readBytes(15 + 48 + 74)
+                let hasBackground = try r.readU8() != 0
+                let background = RGB(colorref: try r.readU32())
+                switch type {
+                case 3:
+                    _ = try r.readBytes(6)
+                    try r.expect([0x06, 0x00], "gradient")
+                    _ = try r.readU8()
+                    let n1 = try r.readU16()
+                    _ = try r.readBytes(8 * Int(n1))
+                    let n2 = try r.readU16()
+                    _ = try r.readBytes(8 * Int(n2) + 4)
+                    let n3 = try r.readU16()
+                    var stops: [GradientStop] = []
+                    for _ in 0..<n3 {
+                        let c = RGB(colorref: try r.readU32())
+                        stops.append(GradientStop(color: c, position: try readF32(&r)))
+                    }
+                    _ = try r.readBytes(17)
+                    fill = .gradient(Gradient(stops: stops))
+                case 4:
+                    _ = try readHeader(&r)
+                    _ = try readLine(&r)
+                    _ = try readFill(&r)
+                    try r.expect([0x06, 0x00], "pattern")
+                    let from = r.offset
+                    while !isPatternTail(r, at: r.offset) {
+                        r.offset += 1
+                        if r.offset >= r.count { throw TSDError.unexpected("end of pattern fill", at: from) }
+                    }
+                    _ = try r.readBytes(50 + 59)
+                    fill = .pattern(FillPattern(kind: 4, background: hasBackground ? background : nil))
+                case 5:
+                    let tile = try readTypedObject(&r)
+                    var shapes = [tile]
+                    if case .group(let kids) = tile.shape { shapes = kids }
+                    fill = .pattern(FillPattern(kind: 5, background: hasBackground ? background : nil, tile: shapes))
+                default:
+                    throw TSDError.unexpected("fill type \(type)", at: start)
+                }
+            }
+        }
+        return (fill, Data(r.bytes[start..<r.offset]))
+    }
+
+    static func style(line: LineBlock, fill: Fill) -> Style {
+        var s = Style(strokeColor: line.color, strokeWidth: line.width,
+                      lineType: LineType(rawValue: Int(line.type)) ?? .dashed, fill: fill)
+        s.dashScale = line.scale
         return s
     }
 
-    static func layerIndex(from hdr12: Data, layers: [Layer]) -> Int {
-        let b = [UInt8](hdr12)
-        let v = Int(b[0]) | (Int(b[1]) << 8)
-        if v == 0 { return layers.first?.index ?? 1 }
-        return layers.contains { $0.index == v } ? v : (layers.first?.index ?? 1)
+    static func readTypedObject(_ r: inout BinaryReader) throws -> DesignObject {
+        let at = r.offset
+        let kind = try r.readU16()
+        guard Record.Kind(rawValue: kind) != nil else { throw TSDError.unknownRecordType(kind, at: at) }
+        return try readObject(&r, kind: kind)
     }
 
-    static func readRecord(_ r: inout BinaryReader, layers: [Layer]) throws -> DesignObject {
+    static func readObject(_ r: inout BinaryReader, kind: UInt16) throws -> DesignObject {
         let start = r.offset
         let h = try readHeader(&r)
-        var object = DesignObject(fileID: h.fileID, layer: layerIndex(from: h.hdr12, layers: layers),
-                                  style: parseStyle(h.style), shape: .point(.zero),
-                                  recordType: h.kind, rawHeader: h.hdr12)
-        object.rawStyle = h.style.isEmpty ? nil : h.style
+        let line = try readLine(&r)
+        let (fill, rawFill) = try readFill(&r)
+        var object = DesignObject(fileID: h.fileID, layer: Int(h.layer), style: style(line: line, fill: fill),
+                                  shape: .point(.zero), recordType: kind, rawHeader: h.tail)
+        object.rawNames = h.names
+        object.rawStyle = line.raw
+        object.rawFill = rawFill
         object.loadedStyle = object.style
 
-        guard let kind = Record.Kind(rawValue: h.kind) else {
-            throw TSDError.unknownRecordType(h.kind, at: start)
-        }
-        switch kind {
+        let bodyStart = r.offset
+        guard let k = Record.Kind(rawValue: kind) else { throw TSDError.unknownRecordType(kind, at: start) }
+        switch k {
         case .path:
-            try r.expect(Record.tagObject, "path tag")
+            try r.expect(Record.pathTag, "path")
             let n = try r.readU32()
             var segments: [PathSegment] = []
             var controls: [TSDPoint] = []
@@ -227,7 +355,7 @@ public enum TSDReader {
             var last: TSDPoint?
             for i in 0..<n {
                 try r.expect([0x03, 0x00], "vertex")
-                let p = TSDPoint(x: try r.readF64(), y: try r.readF64())
+                let p = try readPoint(&r)
                 let flag = try r.readU16()
                 if i == 0 || flag == 0 {
                     segments.append(.move(p)); controls.removeAll()
@@ -247,80 +375,139 @@ public enum TSDReader {
 
         case .line:
             try r.expect([0x01, 0x00], "line")
-            let a = TSDPoint(x: try r.readF64(), y: try r.readF64())
-            let b = TSDPoint(x: try r.readF64(), y: try r.readF64())
-            object.shape = .line(a, b)
+            object.shape = .line(try readPoint(&r), try readPoint(&r))
 
         case .circle:
             try r.expect([0x01, 0x00], "circle")
-            let c = TSDPoint(x: try r.readF64(), y: try r.readF64())
-            let p = TSDPoint(x: try r.readF64(), y: try r.readF64())
-            try r.expect([0x00], "circle end")
+            let c = try readPoint(&r)
+            let p = try readPoint(&r)
+            _ = try r.readU8()
             object.shape = .circle(center: c, radius: c.distance(to: p))
             object.rawCirclePoint = p
 
+        case .arc:
+            // Centre, start and end point, then a direction byte (1 clockwise) and two more.
+            try r.expect([0x01, 0x00], "arc")
+            let c = try readPoint(&r), p1 = try readPoint(&r), p2 = try readPoint(&r)
+            let tail = try r.readBytes(3)
+            let radius = c.distance(to: p1)
+            var a0 = atan2(p1.y - c.y, p1.x - c.x) * 180 / .pi
+            var a1 = atan2(p2.y - c.y, p2.x - c.x) * 180 / .pi
+            if tail.first == 1 { swap(&a0, &a1) }
+            object.shape = .arc(center: c, rx: radius, ry: radius, startAngle: a0, endAngle: a1)
+
+        case .bezier:
+            try r.expect([0x01, 0x00], "curve")
+            _ = try r.readU16()
+            let degree = Int(try r.readU16())
+            var pts: [TSDPoint] = []
+            for _ in 0...degree { pts.append(try readPoint(&r)) }
+            var segments: [PathSegment] = [.move(pts[0])]
+            if degree % 3 == 0 {
+                var i = 1
+                while i + 2 < pts.count { segments.append(.curve(pts[i], pts[i + 1], pts[i + 2])); i += 3 }
+            } else {
+                for p in pts.dropFirst() { segments.append(.line(p)) }
+            }
+            object.shape = .path(PathData(segments: segments, isClosed: false))
+
         case .point:
-            let p = TSDPoint(x: try r.readF64(), y: try r.readF64())
-            try r.expect([0x01], "point end")
+            let p = try readPoint(&r)
+            _ = try r.readU8()
             object.shape = .point(p)
 
         case .group:
-            try r.expect([0x04, 0x00, 0x00, 0x00, 0x03, 0x00], "group")
-            let n = try r.readU32()
-            var kids: [DesignObject] = []
-            for _ in 0..<n { kids.append(try readRecord(&r, layers: layers)) }
-            object.shape = .group(kids)
+            try r.expect(Record.groupTag, "group")
+            object.shape = .group(try readChildren(&r))
+
+        case .container:
+            try r.expect([0x04, 0x00, 0x00, 0x00], "container")
+            _ = try r.readBytes(3)
+            try r.expect(Record.schema, "container")
+            object.shape = .group(try readChildren(&r))
 
         case .text:
-            try r.expect([0x04, 0x00, 0x00, 0x00], "text")
-            let string = try r.readCString()
-            let origin = TSDPoint(x: try r.readF64(), y: try r.readF64())
-            let sx = try r.readF64()
-            try r.expect([0x00, 0x00], "text")
-            let sy = try r.readF64()
-            let anchor = TSDPoint(x: try r.readF64(), y: try r.readF64())
-            try r.expect([0x00], "text end")
-            let font = try readHeader(&r)
-            guard font.kind == Record.Kind.font.rawValue else { throw TSDError.unexpected("font record", at: r.offset) }
-            let fontBody = try readGlyphBody(&r)
-            try r.expect([0x03, 0x00], "glyph list")
-            let glyphCount = try r.readU32()
-            var glyphStyle: Data?
-            var glyphPositions: [TSDPoint] = []
-            for _ in 0..<glyphCount {
-                let g = try readHeader(&r)
-                guard g.kind == Record.Kind.glyph.rawValue else { throw TSDError.unexpected("glyph record", at: r.offset) }
-                if glyphStyle == nil { glyphStyle = g.style }
-                glyphPositions.append(try readGlyphBody(&r).position)
-            }
-            try r.expect([0x00, 0x00], "text terminator")
+            object.shape = .text(try readTextBody(&r))
 
-            let lf = [UInt8](fontBody.logFont)
-            var face = ""
-            var k = 28
-            while k + 1 < lf.count {
-                let u = UInt16(lf[k]) | (UInt16(lf[k + 1]) << 8)
-                if u == 0 { break }
-                face.unicodeScalars.append(Unicode.Scalar(u).map { $0 } ?? "?")
-                k += 2
-            }
-            let weight = Int(lf[16]) | (Int(lf[17]) << 8)
-            let tail = [UInt8](fontBody.tail)
-            var size = 5.0
-            if let s = BinaryReader(fontBody.tail).f64(74), s.isFinite, s > 0.1, s < 1000 { size = s }
-            var t = TextData(string: string, origin: origin, fontFace: face.isEmpty ? "Arial" : face, fontSize: size,
-                             scaleX: sx, scaleY: sy, anchor: anchor,
-                             isBold: weight >= 600, isItalic: lf[20] != 0,
-                             rawLogFont: fontBody.logFont, rawFontTail: Data(tail))
-            t.rawFontStyle = font.style
-            t.rawGlyphStyle = glyphStyle
-            t.rawGlyphPositions = glyphPositions
-            object.shape = .text(t)
+        case .dimension:
+            object.shape = .group(try readDimension(&r, style: object.style))
+
+        case .arrow:
+            object.shape = .group(try readArrow(&r, style: object.style))
 
         case .font, .glyph:
             throw TSDError.unexpected("object", at: start)
         }
+        object.rawBody = RawBody(data: Data(r.bytes[bodyStart..<r.offset]), shape: object.shape,
+                                 layer: object.layer, fileID: object.fileID, style: object.style)
         return object
+    }
+
+    static func readPoint(_ r: inout BinaryReader) throws -> TSDPoint {
+        TSDPoint(x: try r.readF64(), y: try r.readF64())
+    }
+
+    static func readChildren(_ r: inout BinaryReader) throws -> [DesignObject] {
+        let n = try r.readU32()
+        var kids: [DesignObject] = []
+        for _ in 0..<n { kids.append(try readTypedObject(&r)) }
+        return kids
+    }
+
+    // MARK: Text
+
+    static func readTextBody(_ r: inout BinaryReader) throws -> TextData {
+        try r.expect([0x04, 0x00, 0x00, 0x00], "text")
+        let string = try r.readCString()
+        let origin = try readPoint(&r)
+        let sx = try r.readF64()
+        try r.expect([0x00, 0x00], "text")
+        let sy = try r.readF64()
+        let anchor = try readPoint(&r)
+        let flags = try r.readBytes(3)
+
+        // Font: an untyped glyph record holding the LOGFONT.
+        _ = try readHeader(&r)
+        let fontLine = try readLine(&r)
+        let fontFill = try readFill(&r)
+        let fontBody = try readGlyphBody(&r)
+
+        try r.expect([0x03, 0x00], "glyph list")
+        let glyphCount = try r.readU32()
+        var glyphStyle: Data?
+        var glyphPositions: [TSDPoint] = []
+        for _ in 0..<glyphCount {
+            let at = r.offset
+            guard try r.readU16() == Record.Kind.glyph.rawValue else { throw TSDError.unexpected("glyph record", at: at) }
+            _ = try readHeader(&r)
+            let gl = try readLine(&r)
+            let gf = try readFill(&r)
+            if glyphStyle == nil { glyphStyle = gl.raw + gf.1 }
+            glyphPositions.append(try readGlyphBody(&r).position)
+        }
+        try r.expect([0x00, 0x00], "text terminator")
+
+        let lf = [UInt8](fontBody.logFont)
+        var face = ""
+        var k = 28
+        while k + 1 < lf.count {
+            let u = UInt16(lf[k]) | (UInt16(lf[k + 1]) << 8)
+            if u == 0 { break }
+            face.unicodeScalars.append(Unicode.Scalar(u).map { $0 } ?? "?")
+            k += 2
+        }
+        let weight = Int(lf[16]) | (Int(lf[17]) << 8)
+        var size = 5.0
+        if let s = BinaryReader(fontBody.tail).f64(74), s.isFinite, s > 0.1, s < 1000 { size = s }
+        var t = TextData(string: string, origin: origin, fontFace: face.isEmpty ? "Arial" : face, fontSize: size,
+                         scaleX: sx, scaleY: sy, anchor: anchor,
+                         isBold: weight >= 600, isItalic: lf[20] != 0,
+                         rawLogFont: fontBody.logFont, rawFontTail: fontBody.tail)
+        t.rawFontStyle = fontLine.raw + fontFill.1
+        t.rawGlyphStyle = glyphStyle
+        t.rawGlyphPositions = glyphPositions
+        t.rawFlags = flags
+        return t
     }
 
     struct GlyphBody {
@@ -333,10 +520,104 @@ public enum TSDReader {
     static func readGlyphBody(_ r: inout BinaryReader) throws -> GlyphBody {
         try r.expect([0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], "glyph")
         let ch = try r.readU16()
-        let p = TSDPoint(x: try r.readF64(), y: try r.readF64())
+        let p = try readPoint(&r)
         try r.expect([0x02, 0x00], "font")
         let lf = try r.readBytes(Record.logFontLength)
         let tail = try r.readBytes(Record.fontTailLength)
         return GlyphBody(char: ch, position: p, logFont: lf, tail: tail)
+    }
+
+    // MARK: Dimensions and arrows
+    //
+    // Both are kept verbatim for saving. For display they are expanded into ordinary shapes;
+    // once edited they are saved as a group of those shapes.
+
+    /// Linear dimension: the two measured points, a point the dimension line passes
+    /// through, sizes, the "Ø" and "R" prefixes, then the label as an untyped text record.
+    static func readDimension(_ r: inout BinaryReader, style: Style) throws -> [DesignObject] {
+        try r.expect([0x05, 0x00], "dimension")
+        _ = try r.readBytes(7)
+        let p1 = try readPoint(&r), p2 = try readPoint(&r), p3 = try readPoint(&r)
+        let sizes = try (0..<6).map { _ in try r.readF64() }   // 4, 20, 2, 10, 0, 0 in the test file
+        _ = try r.readBytes(3 + 16 + 1)
+        _ = try r.readCString()
+        _ = try r.readCString()
+        _ = try r.readBytes(10)
+
+        let label = try readHeader(&r)
+        let labelLine = try readLine(&r)
+        let (labelFill, _) = try readFill(&r)
+        let text = try readTextBody(&r)
+        var labelObject = DesignObject(fileID: label.fileID, layer: Int(label.layer),
+                                       style: Self.style(line: labelLine, fill: labelFill), shape: .text(text))
+        labelObject.rawNames = label.names
+
+        // Dimension line through p3, parallel to p1-p2, with extension lines and arrowheads.
+        let dx = p2.x - p1.x, dy = p2.y - p1.y
+        let len = max((dx * dx + dy * dy).squareRoot(), 1e-9)
+        let ux = dx / len, uy = dy / len
+        let nx = -uy, ny = ux
+        let offset = (p3.x - p1.x) * nx + (p3.y - p1.y) * ny
+        let side: Double = offset < 0 ? -1 : 1
+        let q1 = TSDPoint(x: p1.x + nx * offset, y: p1.y + ny * offset)
+        let q2 = TSDPoint(x: p2.x + nx * offset, y: p2.y + ny * offset)
+        let overshoot = sizes.count > 2 ? sizes[2] : 2
+        var line = style
+        line.fill = .none
+        func ext(_ p: TSDPoint, _ q: TSDPoint) -> DesignObject {
+            DesignObject(layer: labelObject.layer, style: line,
+                         shape: .line(p, TSDPoint(x: q.x + nx * side * overshoot, y: q.y + ny * side * overshoot)))
+        }
+        let parts: [DesignObject] = [
+            ext(p1, q1), ext(p2, q2),
+            DesignObject(layer: labelObject.layer, style: line, shape: .line(q1, q2)),
+            arrowHead(tip: q1, from: q2, length: 3, width: 1.2, style: style, layer: labelObject.layer),
+            arrowHead(tip: q2, from: q1, length: 3, width: 1.2, style: style, layer: labelObject.layer),
+            labelObject,
+        ]
+        return parts
+    }
+
+    /// Arrow: head sizes, then the shaft as an untyped group of lines.
+    static func readArrow(_ r: inout BinaryReader, style: Style) throws -> [DesignObject] {
+        let start = r.offset
+        try r.expect([0x01, 0x00], "arrow")
+        _ = try r.readBytes(49)
+        let b = BinaryReader(Data(r.bytes[start..<r.offset]))
+        let startHead = (b.f64(16) ?? 5, b.f64(24) ?? 5)
+        let endHead = (b.f64(34) ?? 5, b.f64(42) ?? 5)
+
+        let shaft = try readHeader(&r)
+        let shaftLine = try readLine(&r)
+        let (shaftFill, _) = try readFill(&r)
+        try r.expect(Record.groupTag, "arrow")
+        let lines = try readChildren(&r)
+        _ = shaft; _ = shaftLine; _ = shaftFill
+
+        var parts = lines
+        let ends = lines.compactMap { o -> (TSDPoint, TSDPoint)? in
+            if case .line(let a, let b) = o.shape { return (a, b) } else { return nil }
+        }
+        if let first = ends.first {
+            parts.append(arrowHead(tip: first.0, from: first.1, length: startHead.0, width: startHead.1, style: style, layer: Int(shaft.layer)))
+        }
+        if let last = ends.last {
+            parts.append(arrowHead(tip: last.1, from: last.0, length: endHead.0, width: endHead.1, style: style, layer: Int(shaft.layer)))
+        }
+        return parts
+    }
+
+    static func arrowHead(tip: TSDPoint, from: TSDPoint, length: Double, width: Double, style: Style, layer: Int) -> DesignObject {
+        let dx = tip.x - from.x, dy = tip.y - from.y
+        let d = max((dx * dx + dy * dy).squareRoot(), 1e-9)
+        let ux = dx / d, uy = dy / d
+        let base = TSDPoint(x: tip.x - ux * length, y: tip.y - uy * length)
+        let hw = width / 2
+        let a = TSDPoint(x: base.x - uy * hw, y: base.y + ux * hw)
+        let b = TSDPoint(x: base.x + uy * hw, y: base.y - ux * hw)
+        var s = style
+        s.fill = .solid(style.effectiveStroke)
+        return DesignObject(layer: layer, style: s,
+                            shape: .path(PathData(segments: [.move(tip), .line(a), .line(b), .line(tip)], isClosed: true)))
     }
 }

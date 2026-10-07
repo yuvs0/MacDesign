@@ -1,152 +1,193 @@
-"""Reference implementation of the 2D Design V3 grammar used by TSDKit (see docs/FORMAT.md).
+"""Reference implementation of the 2D Design V3 object grammar used by TSDKit (see docs/FORMAT.md).
 
-Parses a .3vs into prefix / layers / middle / objects / trailer, re-serialises it, and
-reports whether the result is byte-identical. Usage: python3 tools/tsd_reference.py FILE...
+Walks every record and checks the object list ends exactly at the standard trailer.
+Usage: python3 tools/tsd_reference.py [-v] FILE...   (-v prints one line per record)
 """
 import struct, sys
 
-HDR_TAIL = bytes.fromhex("ffffffffffffffff00") + b"\xff\xfe\xff\x01;\x00" * 2 + bytes.fromhex("03000100") + bytes(12) + b"\x05\x00"
+TRAILER = bytes.fromhex("000000000001000100010000000000000001000100010000000000000000000000")
+MIDDLE_END = bytes.fromhex("1900090000000300")
+KINDS = {0x00: "font", 0x02: "point", 0x05: "line", 0x06: "circle", 0x07: "arc", 0x08: "bezier",
+         0x09: "path", 0x0A: "group", 0x0B: "glyph", 0x0C: "text", 0x0D: "dimension",
+         0x0E: "container", 0x17: "arrow"}
+FILLS = ["none", "solid", "hatch", "gradient", "char pattern", "shape pattern"]
+LINES = ["none", "solid", "dashed", "dotted", "dash-dot"]
 
-def cstr(b, o):
-    assert b[o:o+3] == b"\xff\xfe\xff", hex(o)
-    n = b[o+3]; return b[o+4:o+4+2*n].decode("utf-16le"), o + 4 + 2*n
+
+class GrammarError(Exception):
+    pass
+
 
 class P:
-    def __init__(self, b): self.b = b; self.o = 0
+    def __init__(self, b, o, verbose):
+        self.b, self.o, self.verbose = b, o, verbose
+
+    def u8(self): v = self.b[self.o]; self.o += 1; return v
     def u16(self): v = struct.unpack_from("<H", self.b, self.o)[0]; self.o += 2; return v
     def u32(self): v = struct.unpack_from("<I", self.b, self.o)[0]; self.o += 4; return v
     def f64(self): v = struct.unpack_from("<d", self.b, self.o)[0]; self.o += 8; return v
-    def raw(self, n): v = self.b[self.o:self.o+n]; self.o += n; return v
-    def expect(self, bs):
-        got = self.raw(len(bs)); assert got == bs, (hex(self.o-len(bs)), got.hex(), bs.hex())
+    def raw(self, n): v = self.b[self.o:self.o + n]; self.o += n; return v
 
-def parse_record(p):
-    """Returns dict with type, id, layer(u32 guess), hasStyle, style, body (raw), children."""
-    rec = {}
-    start = p.o
-    rec["type"] = p.u16()
-    p.expect(b"\x03\x00\x01\x00")
-    rec["id"] = p.u16()
-    p.expect(bytes(6))
-    p.expect(HDR_TAIL[:9])            # ff*8 00
-    p.expect(HDR_TAIL[9:21])          # ;;
-    p.expect(b"\x03\x00\x01\x00")
-    rec["hdr12"] = p.raw(12)
-    p.expect(b"\x05\x00")
-    rec["hasStyle"] = p.u16()
-    rec["style"] = p.raw(17) if rec["hasStyle"] == 1 else b""
-    t = rec["type"]
-    if t == 0x09:                      # path
-        p.expect(b"\x03\x00\x01\x00")
-        n = p.u32(); verts = []
+    def expect(self, bs, what):
+        got = self.raw(len(bs))
+        if got != bs:
+            raise GrammarError(f"{what}: expected {bs.hex()} got {got.hex()} at {self.o - len(bs):#x}")
+
+    def cstr(self):
+        self.expect(b"\xff\xfe\xff", "string")
+        n = self.u8()
+        s = self.b[self.o:self.o + 2 * n].decode("utf-16le"); self.o += 2 * n
+        return s
+
+    def log(self, depth, text):
+        if self.verbose: print("  " * depth + text)
+
+    # Blocks
+
+    def header(self):
+        self.expect(b"\x03\x00", "header")
+        layer, number = self.u16(), self.u16()
+        self.raw(14); self.expect(b"\x00", "header")
+        self.cstr(); self.cstr()
+        return layer, number
+
+    def line(self):
+        self.expect(b"\x03\x00", "line block")
+        t = self.u16()
+        if t == 1: width = self.f64(); colour = self.u32()
+        elif t == 0: width, colour = 0, 0
+        else: self.u16(); self.f64(); width = self.f64(); colour = self.u32()
+        return f"{LINES[t] if t < len(LINES) else t} w={width:g} #{colour:06x}"
+
+    def matrix(self):
+        self.expect(b"\x01\x00", "transform")
+        return struct.unpack_from("<6d", self.raw(48))
+
+    def pattern_tail_at(self, o):
+        if self.b[o:o + 2] != b"\x01\x00" or self.b[o + 50:o + 54] != b"\x01\x00\x01\x00":
+            return False
+        m = struct.unpack_from("<6d", self.b, o + 2)
+        return all(abs(v) < 1e6 for v in m) and abs(m[0] * m[3] - m[1] * m[2]) > 1e-9
+
+    def fill(self, depth):
+        self.expect(b"\x05\x00", "fill block")
+        f = self.u16()
+        if f == 0: return "none"
+        if f == 1: self.raw(17); return "solid"
+        self.u16()
+        if self.u8(): self.raw(4)
+        self.matrix()
+        if f == 2:
+            self.line(); self.raw(24 + 2); n = self.u16(); self.raw(16 * n)
+            return "hatch"
+        self.raw(15 + 48 + 74 + 5)
+        if f == 3:
+            self.raw(6); self.expect(b"\x06\x00", "gradient"); self.u8()
+            n = self.u16(); self.raw(8 * n)
+            n = self.u16(); self.raw(8 * n + 4)
+            n = self.u16(); self.raw(8 * n)
+            self.raw(17)
+        elif f == 4:
+            self.header(); self.line(); self.fill(depth + 1)
+            self.expect(b"\x06\x00", "pattern")
+            start = self.o
+            while not self.pattern_tail_at(self.o):
+                self.o += 1
+                if self.o >= len(self.b): raise GrammarError(f"pattern tail not found after {start:#x}")
+            self.raw(50 + 59)
+        elif f == 5:
+            self.typed(depth + 1)
+        else:
+            raise GrammarError(f"fill type {f} at {self.o:#x}")
+        return FILLS[f]
+
+    # Records
+
+    def typed(self, depth):
+        at = self.o
+        t = self.u16()
+        if t not in KINDS: raise GrammarError(f"unknown record type {t:#x} at {at:#x}")
+        self.record(t, depth, at)
+
+    def record(self, t, depth, at):
+        layer, number = self.header()
+        line = self.line()
+        fill = self.fill(depth)
+        what = self.body(t, depth)
+        self.log(depth, f"{at:#07x} {KINDS[t]} layer {layer} #{number} line {line} fill {fill} {what}")
+
+    def children(self, depth):
+        n = self.u32()
+        for _ in range(n): self.typed(depth + 1)
+        return f"{n} parts"
+
+    def text_body(self, depth):
+        self.expect(b"\x04\x00\x00\x00", "text")
+        s = self.cstr(); self.raw(24 + 2 + 24 + 3)
+        self.header(); self.line(); self.fill(depth); self.glyph_body()
+        self.expect(b"\x03\x00", "glyph list")
+        n = self.u32()
         for _ in range(n):
-            p.expect(b"\x03\x00"); x = p.f64(); y = p.f64(); f = p.u16(); verts.append((x, y, f))
-        rec["verts"] = verts
-    elif t in (0x05, 0x06):            # line
-        p.expect(b"\x01\x00")
-        rec["pts"] = [p.f64() for _ in range(4)]
-        if t == 0x06: rec["tail"] = p.raw(1)
-    elif t == 0x02:                    # point
-        rec["pts"] = [p.f64(), p.f64()]; rec["tail"] = p.raw(1)
-    elif t == 0x0a:                    # group
-        p.expect(b"\x04\x00\x00\x00\x03\x00")
-        n = p.u32(); rec["children"] = [parse_record(p) for _ in range(n)]
-    elif t == 0x0c:                    # text
-        p.expect(b"\x04\x00\x00\x00")
-        rec["text"], p.o = cstr(p.b, p.o)
-        rec["x"] = p.f64(); rec["y"] = p.f64(); rec["sx"] = p.f64()
-        p.expect(b"\x00\x00"); rec["sy"] = p.f64(); rec["ax"] = p.f64(); rec["ay"] = p.f64()
-        p.expect(b"\x00")
-        font = parse_record(p); assert font["type"] == 0
-        rec["font"] = font
-        p.expect(b"\x03\x00"); n = p.u32()
-        rec["glyphs"] = [parse_record(p) for _ in range(n)]
-        p.expect(b"\x00\x00")
-    elif t in (0x00, 0x0b):            # font / glyph
-        p.expect(b"\x03\x00"); p.expect(bytes(5)); rec["char"] = p.u16()
-        rec["x"] = p.f64(); rec["y"] = p.f64()
-        p.expect(b"\x02\x00"); rec["logfont"] = p.raw(92); rec["fonttail"] = p.raw(90)
-    else:
-        raise ValueError(f"unknown type {t:#x} at {start:#x}")
-    return rec
+            if self.u16() != 0x0B: raise GrammarError(f"glyph expected at {self.o - 2:#x}")
+            self.header(); self.line(); self.fill(depth); self.glyph_body()
+        self.expect(b"\x00\x00", "text end")
+        return repr(s)
 
-def write_record(r):
-    w = bytearray()
-    w += struct.pack("<H", r["type"]) + b"\x03\x00\x01\x00" + struct.pack("<H", r["id"]) + bytes(6)
-    w += HDR_TAIL[:21] + b"\x03\x00\x01\x00" + r["hdr12"] + b"\x05\x00" + struct.pack("<H", r["hasStyle"]) + r["style"]
-    t = r["type"]
-    if t == 0x09:
-        w += b"\x03\x00\x01\x00" + struct.pack("<I", len(r["verts"]))
-        for x, y, f in r["verts"]: w += b"\x03\x00" + struct.pack("<ddH", x, y, f)
-    elif t in (0x05, 0x06):
-        w += b"\x01\x00" + struct.pack("<4d", *r["pts"]) + r.get("tail", b"")
-    elif t == 0x02:
-        w += struct.pack("<2d", *r["pts"]) + r["tail"]
-    elif t == 0x0a:
-        w += b"\x04\x00\x00\x00\x03\x00" + struct.pack("<I", len(r["children"]))
-        for c in r["children"]: w += write_record(c)
-    elif t == 0x0c:
-        s = r["text"].encode("utf-16le")
-        w += b"\x04\x00\x00\x00\xff\xfe\xff" + bytes([len(r["text"])]) + s
-        w += struct.pack("<ddd", r["x"], r["y"], r["sx"]) + b"\x00\x00" + struct.pack("<ddd", r["sy"], r["ax"], r["ay"]) + b"\x00"
-        w += write_record(r["font"]) + b"\x03\x00" + struct.pack("<I", len(r["glyphs"]))
-        for g in r["glyphs"]: w += write_record(g)
-        w += b"\x00\x00"
-    elif t in (0x00, 0x0b):
-        w += b"\x03\x00" + bytes(5) + struct.pack("<Hdd", r["char"], r["x"], r["y"]) + b"\x02\x00" + r["logfont"] + r["fonttail"]
-    return bytes(w)
+    def glyph_body(self):
+        self.expect(b"\x03\x00\x00\x00\x00\x00\x00", "glyph"); self.u16(); self.raw(16)
+        self.expect(b"\x02\x00", "font"); self.raw(92 + 90)
 
-def parse_file(b):
-    # layers
-    l1 = b.find("Layer 1".encode("utf-16le")) - 4 - 4   # back over cstring marker and "01 00 03 00"
-    count_off = l1 - 4
-    assert b[count_off:count_off+4] == b"\x03\x00\x00\x00", b[count_off:count_off+4].hex()
-    prefixA = b[:count_off]
-    p = P(b); p.o = count_off; p.u32()
-    layers = []
-    for _ in range(3):
-        p.expect(b"\x01\x00\x03\x00")
-        n1, p.o = cstr(b, p.o); n2, p.o = cstr(b, p.o); assert n1 == n2
-        idx = p.u16(); flags = p.raw(2); p.expect(bytes(7)); p.expect(b"\xff"*16); p.expect(b"\x00")
-        layers.append((n1, idx, flags))
-    mid_start = p.o
-    # find object count: the first object record is preceded by "03 00 [count]"; locate via settings record end
-    # settings record ends with "19 00 09 00 00 00 03 00" then count
-    key = bytes.fromhex("19000900000003 00".replace(" ", ""))
-    k = b.find(key, mid_start); assert k > 0
-    middle = b[mid_start:k+len(key)]
-    p.o = k + len(key)
+    def body(self, t, depth):
+        if t == 0x09:
+            self.expect(b"\x03\x00\x01\x00", "path"); n = self.u32()
+            for _ in range(n): self.expect(b"\x03\x00", "vertex"); self.raw(18)
+            return f"{n} vertices"
+        if t == 0x05: self.expect(b"\x01\x00", "line"); self.raw(32); return ""
+        if t == 0x06: self.expect(b"\x01\x00", "circle"); self.raw(33); return ""
+        if t == 0x07: self.expect(b"\x01\x00", "arc"); self.raw(48); return "clockwise" if self.raw(3)[0] else ""
+        if t == 0x08: self.expect(b"\x01\x00", "bezier"); self.u16(); n = self.u16(); self.raw(16 * (n + 1)); return ""
+        if t == 0x02: self.raw(17); return ""
+        if t == 0x0A: self.expect(b"\x04\x00\x00\x00\x03\x00", "group"); return self.children(depth)
+        if t == 0x0E:
+            self.expect(b"\x04\x00\x00\x00", "container"); self.raw(3); self.expect(b"\x03\x00", "container")
+            return self.children(depth)
+        if t == 0x0C: return self.text_body(depth)
+        if t == 0x0D:
+            self.expect(b"\x05\x00", "dimension"); self.raw(7 + 96 + 3 + 16 + 1)
+            self.cstr(); self.cstr(); self.raw(10)
+            self.header(); self.line(); self.fill(depth)
+            return "label " + self.text_body(depth)
+        if t == 0x17:
+            self.expect(b"\x01\x00", "arrow"); self.raw(49)
+            self.header(); self.line(); self.fill(depth)
+            self.expect(b"\x04\x00\x00\x00\x03\x00", "arrow")
+            return self.children(depth)
+        raise GrammarError(f"no body grammar for type {t:#x}")
+
+
+def check(path, verbose):
+    b = open(path, "rb").read()
+    k = b.find(MIDDLE_END)
+    if k < 0: raise GrammarError("object list not found")
+    p = P(b, k + len(MIDDLE_END), verbose)
     n = p.u32()
-    objs = []
     for _ in range(n):
-        pre = b""
-        if b[p.o:p.o+2] == b"\x04\x00" and b[p.o+4:p.o+8] == b"\x03\x00\x01\x00": pre = p.raw(2)   # oddity before point
-        r = parse_record(p); r["pre"] = pre; objs.append(r)
-    trailer = p.raw(len(b) - p.o)
-    return prefixA, layers, middle, objs, trailer
+        if b[p.o:p.o + 2] == b"\x04\x00" and b[p.o + 4:p.o + 6] == b"\x03\x00":
+            p.o += 2   # unexplained 04 00 before point records
+        p.typed(0)
+    rest = b[p.o:]
+    trailer = "standard trailer" if rest == TRAILER else f"{len(rest)} trailing bytes: {rest[:40].hex()}"
+    return n, trailer
 
-def write_file(prefixA, layers, middle, objs, trailer):
-    w = bytearray(prefixA) + b"\x03\x00\x00\x00"
-    for name, idx, flags in layers:
-        s = name.encode("utf-16le"); cs = b"\xff\xfe\xff" + bytes([len(name)]) + s
-        w += b"\x01\x00\x03\x00" + cs + cs + struct.pack("<H", idx) + flags + bytes(7) + b"\xff"*16 + b"\x00"
-    w += middle + struct.pack("<I", len(objs))
-    for r in objs: w += r["pre"] + write_record(r)
-    w += trailer
-    return bytes(w)
 
 if __name__ == "__main__":
-    for f in sys.argv[1:]:
-        b = open(f, "rb").read()
-        parts = parse_file(b)
-        out = write_file(*parts)
-        prefixA, layers, middle, objs, trailer = parts
-        print(f, "roundtrip", "OK" if out == b else "MISMATCH", "| prefixA", len(prefixA), "middle", len(middle), "objects", len(objs), "trailer", len(trailer), trailer.hex())
-        def show(r, ind="  "):
-            extra = ""
-            if r["type"] == 0x09: extra = f"{len(r['verts'])} verts"
-            if r["type"] in (5, 6, 2): extra = str([round(v, 2) for v in r["pts"]])
-            if r["type"] == 0x0c: extra = repr(r["text"]) + f" ({r['x']:.1f},{r['y']:.1f}) s({r['sx']},{r['sy']}) a({r['ax']:.2f},{r['ay']:.2f}) glyphs {len(r['glyphs'])} tail {r['font']['fonttail'][:16].hex()}"
-            print(ind, f"type {r['type']:02x} id {r['id']:02x} hdr12 {r['hdr12'].hex()} style {r['style'].hex()} {extra}")
-            for c in r.get("children", []): show(c, ind + "    ")
-        for r in objs: show(r)
+    args = [a for a in sys.argv[1:] if a != "-v"]
+    ok = True
+    for f in args:
+        try:
+            n, trailer = check(f, "-v" in sys.argv)
+            print(f"{f}: {n} objects, {trailer}")
+        except GrammarError as e:
+            ok = False
+            print(f"{f}: FAILED {e}")
+    sys.exit(0 if ok else 1)

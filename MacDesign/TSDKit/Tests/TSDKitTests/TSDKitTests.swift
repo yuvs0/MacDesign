@@ -32,7 +32,8 @@ final class TSDKitTests: XCTestCase {
             XCTAssertEqual(box.minX, 180, accuracy: 1e-9)
             XCTAssertEqual(box.maxY, 170, accuracy: 1e-9)
         }
-        XCTAssertEqual(r.style.strokeColor, RGB(r: 0xC6, g: 0, b: 0))
+        XCTAssertEqual(r.style.fill, .solid(RGB(r: 0xC6, g: 0, b: 0)))
+        XCTAssertEqual(r.style.strokeColor, .black)
 
         let circles = doc.objects.filter { if case .circle = $0.shape { return true } else { return false } }
         XCTAssertEqual(circles.count, 5)
@@ -44,7 +45,12 @@ final class TSDKitTests: XCTestCase {
     }
 
     func testRoundTripIsByteIdentical() throws {
-        let url = try fixture("clock")
+        for name in ["clock", "features"] {
+            try assertRoundTrip(try fixture(name))
+        }
+    }
+
+    func assertRoundTrip(_ url: URL) throws {
         let original = try Data(contentsOf: url)
         let doc = try TSDReader.read(data: original)
         let written = try TSDWriter.data(for: doc)
@@ -62,8 +68,75 @@ final class TSDKitTests: XCTestCase {
                     i += 32
                 } else { i += 1 }
             }
-            XCTFail("Round trip differs: " + diffs.joined(separator: "\n"))
+            XCTFail("Round trip of \(url.lastPathComponent) differs: " + diffs.joined(separator: "\n"))
         }
+    }
+
+    /// features.3vs: a test sheet saved from 2D Design with one feature per shape.
+    func testReadsEveryFeature() throws {
+        let doc = try TSDReader.read(url: try fixture("features"))
+        XCTAssertFalse(doc.isReadOnly)
+        XCTAssertEqual(doc.objects.count, 32)
+
+        // Row 1: line styles.
+        let row1 = doc.objects[0..<7].map { $0.style }
+        XCTAssertEqual(row1.map { $0.lineType }, [.solid, .dashed, .dotted, .dashDot, .solid, .solid, .solid])
+        XCTAssertEqual(row1[4].strokeWidth, 1, accuracy: 1e-9)
+        XCTAssertEqual(row1[0].strokeWidth, 0)
+        XCTAssertEqual(row1[5].strokeColor, .red)
+        XCTAssertEqual(row1[6].strokeColor, RGB(r: 0, g: 255, b: 0))
+
+        // Row 2: fills.
+        let fills = doc.objects[7..<14].map { $0.style.fill }
+        XCTAssertEqual(fills[0], .none)
+        XCTAssertEqual(fills[1], .solid(.red))
+        guard case .hatch(let hatch) = fills[2] else { return XCTFail("hatch") }
+        XCTAssertEqual(hatch.color, .red)
+        XCTAssertEqual(hatch.angle, 45, accuracy: 1e-9)
+        guard case .gradient(let gradient) = fills[3] else { return XCTFail("gradient") }
+        XCTAssertEqual(gradient.stops.map { $0.color }, [.red, .white])
+        guard case .pattern(let chars) = fills[4], case .pattern(let tile) = fills[5] else { return XCTFail("patterns") }
+        XCTAssertEqual(chars.kind, 4)
+        XCTAssertEqual(tile.kind, 5)
+        XCTAssertEqual(tile.tile.count, 12)
+        guard case .hatch(let cross) = fills[6] else { return XCTFail("cross hatch") }
+        XCTAssertTrue(cross.isCrossed)
+
+        // Layers are in the record header.
+        XCTAssertEqual(Set(doc.objects.map { $0.layer }), [1, 2])
+        let texts = doc.objects.compactMap { o -> TextData? in if case .text(let t) = o.shape { return t } else { return nil } }
+        XCTAssertEqual(texts.map { $0.string }, ["Layer 1", "Layer 2"])
+        XCTAssertEqual(doc.objects.first { if case .text(let t) = $0.shape { return t.string == "Layer 2" }; return false }?.layer, 2)
+
+        // Layer 2: native circle and arc, a dimension and an arrow.
+        let kinds = doc.objects.compactMap { $0.recordType }
+        XCTAssertTrue(kinds.contains(Record.Kind.arc.rawValue))
+        let dimension = try XCTUnwrap(doc.objects.first { $0.recordType == Record.Kind.dimension.rawValue })
+        guard case .group(let parts) = dimension.shape else { return XCTFail("dimension parts") }
+        XCTAssertTrue(parts.contains { if case .text(let t) = $0.shape { return t.string == "70" }; return false })
+        XCTAssertNotNil(doc.objects.first { $0.recordType == Record.Kind.arrow.rawValue })
+        if case .arc(let c, let r, _, let a0, let a1) = try XCTUnwrap(doc.objects.first { $0.recordType == Record.Kind.arc.rawValue }).shape {
+            XCTAssertEqual(c, TSDPoint(x: 45, y: 205)); XCTAssertEqual(r, 5, accuracy: 1e-9)
+            XCTAssertEqual(a0, 180, accuracy: 1e-9); XCTAssertEqual(a1, 90, accuracy: 1e-9)
+        } else { XCTFail("arc") }
+    }
+
+    func testEditedFeaturesStillSave() throws {
+        var doc = try TSDReader.read(url: try fixture("features"))
+        // Move everything: dimensions and arrows become groups, arcs stay native.
+        doc.objects = doc.objects.map { Geometry.transform($0, by: .translation(5, -3)) }
+        doc.objects[0].style.lineType = .dashed
+        doc.objects[0].style.strokeWidth = 0.5
+        doc.objects[1].layer = 3
+        let back = try TSDReader.read(data: try TSDWriter.data(for: doc))
+        XCTAssertEqual(back.objects.count, 32)
+        XCTAssertEqual(back.objects[0].style.lineType, .dashed)
+        XCTAssertEqual(back.objects[0].style.strokeWidth, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(back.objects[1].layer, 3)
+        XCTAssertEqual(back.objects[9].style.fill, doc.objects[9].style.fill)   // hatch kept verbatim
+        if case .rect(let r) = back.objects[0].shape { XCTAssertEqual(r.minX, 25, accuracy: 1e-9) } else { XCTFail("rect") }
+        let arc = try XCTUnwrap(back.objects.first { $0.recordType == Record.Kind.arc.rawValue })
+        if case .arc(let c, _, _, _, _) = arc.shape { XCTAssertEqual(c.x, 50, accuracy: 1e-9) } else { XCTFail("arc") }
     }
 
     func testEditedDocumentReadsBack() throws {
