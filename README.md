@@ -51,16 +51,18 @@ swift run tsdconv --format svg -o ~/Desktop/out ~/Downloads/  # whole folder
   delete layers. The active layer receives new shapes.
 - **Snapping**: while you draw, move or resize, edges, centres and corners snap to other
   objects and to the page, with pink guide lines and a trackpad click when a snap engages.
-  Hold ⌘ to drag without snapping. **View > Snap to Objects** and **Snap to Grid** turn
-  each kind on or off; **View > Haptic Feedback When Snapping** silences the click.
-- **Grid**: **View > Show Grid** (⌘'), spacing from the **Grid Spacing** submenu (or
-  **Other…** for any value), with heavier major lines every few lines.
+  Hold ⌘ to drag without snapping. **View > Grid Lock** (⌘L) snaps everything to the
+  grid, as 2D Design does by default; **Snap to Objects** (⇧⌘') and **Haptic Feedback
+  When Snapping** turn the other two off.
+- **Grid**: 10 mm by default, shown with **View > Show Grid** (⌘'). Spacing comes from the
+  **Grid Spacing** submenu (or **Other…** for any value), with optional heavier major
+  lines every few lines.
 - **Align**: the align button in the toolbar, **Object > Align**, or the row in the
   inspector. One selected object aligns to the page; several align to each other. With
   three or more, distribute spaces them evenly.
-- **Object** menu: group, ungroup, bring forward or send backward. **Make Path** (⌘J)
+- **Object** menu: group, ungroup, bring forward or send backward. **Make Path** (⌘H)
   joins the selected shapes wherever their ends touch: one contiguous run becomes a single
-  path, several runs become a group of paths. **Explode…** (⇧⌘J) asks how far to go:
+  path, several runs become a group of paths. **Explode…** (⌘E) asks how far to go:
   one level (a group into its members, a path into its separate runs, a run into its
   segments) or fully (down to lines, curves, circles and arcs).
 - **File > Save** writes `.3vs`. **Export** (toolbar) writes SVG, DXF, PDF or PNG.

@@ -11,16 +11,17 @@ enum GridPrefs {
     static let majorEveryKey = "gridMajorEvery"
     static let hapticsKey = "snapHaptics"
 
-    static let spacingPresets: [Double] = [1, 2, 2.5, 5, 10, 20]
+    static let spacingPresets: [Double] = [1, 2, 2.5, 5, 10, 20, 25, 50]
     static let majorPresets: [Int] = [1, 2, 4, 5, 10]
 
     static func register() {
         UserDefaults.standard.register(defaults: [
-            showGridKey: false,
-            snapToGridKey: false,
+            // 2D Design's defaults: a 10 mm grid with grid lock on.
+            showGridKey: true,
+            snapToGridKey: true,
             snapToObjectsKey: true,
-            gridSpacingKey: 5.0,
-            majorEveryKey: 2,
+            gridSpacingKey: 10.0,
+            majorEveryKey: 1,
             hapticsKey: true,
         ])
     }
@@ -31,7 +32,7 @@ enum GridPrefs {
     static var haptics: Bool { UserDefaults.standard.bool(forKey: hapticsKey) }
     static var spacing: Double {
         let v = UserDefaults.standard.double(forKey: gridSpacingKey)
-        return v > 0 ? v : 5
+        return v > 0 ? v : 10
     }
     static var majorEvery: Int { max(1, UserDefaults.standard.integer(forKey: majorEveryKey)) }
 
@@ -135,48 +136,51 @@ struct Snapper {
         return (v / g).rounded() * g - v
     }
 
-    /// Snaps a single point (drawing, resizing, pen anchors).
+    /// Snaps a single point (drawing, resizing, pen anchors). With grid lock on, the grid
+    /// wins as in 2D Design; an object edge only takes over when it's closer than the grid.
     func snap(point p: TSDPoint) -> (TSDPoint, Result) {
         var r = Result()
         var q = p
-        if let hit = nearest([p.x], in: xs) {
+        let gx = gridDelta(p.x), gy = gridDelta(p.y)
+        if let hit = nearest([p.x], in: xs), gx == nil || abs(hit.delta) < abs(gx!) {
             q.x += hit.delta
             r.guides.append(SnapGuide(axis: .vertical, position: hit.target.value,
                                       from: min(hit.target.span.lowerBound, p.y), to: max(hit.target.span.upperBound, p.y)))
             r.objectSnapKey.append(hit.target.value)
-        } else if let d = gridDelta(p.x) {
+        } else if let d = gx {
             q.x += d
         }
-        if let hit = nearest([p.y], in: ys) {
+        if let hit = nearest([p.y], in: ys), gy == nil || abs(hit.delta) < abs(gy!) {
             q.y += hit.delta
             r.guides.append(SnapGuide(axis: .horizontal, position: hit.target.value,
                                       from: min(hit.target.span.lowerBound, p.x), to: max(hit.target.span.upperBound, p.x)))
             r.objectSnapKey.append(hit.target.value + 1e6)
-        } else if let d = gridDelta(p.y) {
+        } else if let d = gy {
             q.y += d
         }
         r.offset = (q.x - p.x, q.y - p.y)
         return (q, r)
     }
 
-    /// Snaps a box being moved: its edges and centre meet other objects; failing that, its
-    /// top-left corner sits on the grid.
+    /// Snaps a box being moved: its edges and centre meet other objects, or its top-left
+    /// corner sits on the grid, whichever is nearer.
     func snap(box b: TSDRect) -> Result {
         var r = Result()
-        if let hit = nearest([b.minX, b.center.x, b.maxX], in: xs) {
+        let gx = gridDelta(b.minX), gy = gridDelta(b.maxY)
+        if let hit = nearest([b.minX, b.center.x, b.maxX], in: xs), gx == nil || abs(hit.delta) < abs(gx!) {
             r.offset.dx = hit.delta
             r.guides.append(SnapGuide(axis: .vertical, position: hit.target.value,
                                       from: min(hit.target.span.lowerBound, b.minY), to: max(hit.target.span.upperBound, b.maxY)))
             r.objectSnapKey.append(hit.target.value)
-        } else if let d = gridDelta(b.minX) {
+        } else if let d = gx {
             r.offset.dx = d
         }
-        if let hit = nearest([b.minY, b.center.y, b.maxY], in: ys) {
+        if let hit = nearest([b.minY, b.center.y, b.maxY], in: ys), gy == nil || abs(hit.delta) < abs(gy!) {
             r.offset.dy = hit.delta
             r.guides.append(SnapGuide(axis: .horizontal, position: hit.target.value,
                                       from: min(hit.target.span.lowerBound, b.minX), to: max(hit.target.span.upperBound, b.maxX)))
             r.objectSnapKey.append(hit.target.value + 1e6)
-        } else if let d = gridDelta(b.maxY) {
+        } else if let d = gy {
             r.offset.dy = d
         }
         return r

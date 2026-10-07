@@ -190,93 +190,135 @@ extension FocusedValues {
 
 struct EditorCommands: Commands {
     @FocusedValue(\.editorState) private var state
-    @AppStorage(GridPrefs.showGridKey) private var showGrid = false
-    @AppStorage(GridPrefs.snapToGridKey) private var snapToGrid = false
-    @AppStorage(GridPrefs.snapToObjectsKey) private var snapToObjects = true
-    @AppStorage(GridPrefs.gridSpacingKey) private var gridSpacing = 5.0
-    @AppStorage(GridPrefs.majorEveryKey) private var majorEvery = 2
-    @AppStorage(GridPrefs.hapticsKey) private var haptics = true
 
     var body: some Commands {
+        // Hide loses ⌘H so Make Path can have it, as in 2D Design.
+        CommandGroup(replacing: .appVisibility) {
+            Button("Hide MacDesign") { NSApp.hide(nil) }
+                .keyboardShortcut("h", modifiers: [.command, .control])
+            Button("Hide Others") { NSApp.hideOtherApplications(nil) }
+                .keyboardShortcut("h", modifiers: [.command, .option])
+            Button("Show All") { NSApp.unhideAllApplications(nil) }
+        }
+        // The Find and Spelling submenus claim ⌘E, ⌘G and ⌘J; a drawing app doesn't need them.
+        CommandGroup(replacing: .textEditing) {}
         CommandGroup(after: .pasteboard) {
-            Button("Select All") { state?.selectAll() }
-                .keyboardShortcut("a", modifiers: .command)
-                .disabled(state == nil)
-            Button("Deselect All") { state?.deselectAll() }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
-                .disabled(state == nil)
-            Button("Duplicate") { state?.duplicateSelection() }
-                .keyboardShortcut("d", modifiers: .command)
-                .disabled(state?.selection.isEmpty ?? true)
+            if let state { EditMenuItems(state: state) }
         }
         CommandMenu("Object") {
-            Button("Group") { state?.groupSelection() }
-                .keyboardShortcut("g", modifiers: .command)
-                .disabled((state?.selection.count ?? 0) < 2)
-            Button("Ungroup") { state?.ungroupSelection() }
-                .keyboardShortcut("g", modifiers: [.command, .shift])
-                .disabled(state?.selection.isEmpty ?? true)
-            Divider()
-            Button("Make Path") { state?.makePath() }
-                .keyboardShortcut("j", modifiers: .command)
-                .disabled(state?.selection.isEmpty ?? true)
-            Button("Explode…") { state?.requestExplode() }
-                .keyboardShortcut("j", modifiers: [.command, .shift])
-                .disabled(state?.selection.isEmpty ?? true)
-            Divider()
-            Button("Bring to Front") { state?.arrange(.front) }
-                .keyboardShortcut("]", modifiers: [.command, .option])
-            Button("Bring Forward") { state?.arrange(.forward) }
-                .keyboardShortcut("]", modifiers: .command)
-            Button("Send Backward") { state?.arrange(.backward) }
-                .keyboardShortcut("[", modifiers: .command)
-            Button("Send to Back") { state?.arrange(.back) }
-                .keyboardShortcut("[", modifiers: [.command, .option])
-            Divider()
-            AlignMenu(state: state)
-            Divider()
-            ForEach(Tool.allCases) { tool in
-                Button("\(tool.title) Tool") { state?.tool = tool }
-                    .keyboardShortcut(KeyEquivalent(tool.shortcut), modifiers: [.command, .control])
-            }
+            if let state { ObjectMenuItems(state: state) }
         }
-        CommandMenu("View") {
-            Button("Zoom In") { state?.zoom(by: 1.25) }
-                .keyboardShortcut("=", modifiers: .command)
-            Button("Zoom Out") { state?.zoom(by: 1 / 1.25) }
-                .keyboardShortcut("-", modifiers: .command)
-            Button("Zoom to Fit") { state?.needsZoomToFit = true }
-                .keyboardShortcut("0", modifiers: .command)
-            Divider()
-            Toggle("Show Grid", isOn: $showGrid)
-                .keyboardShortcut("'", modifiers: .command)
-            Toggle("Snap to Grid", isOn: $snapToGrid)
-                .keyboardShortcut("'", modifiers: [.command, .shift])
-            Toggle("Snap to Objects", isOn: $snapToObjects)
-                .keyboardShortcut(";", modifiers: [.command, .shift])
-            Menu("Grid Spacing") {
-                ForEach(GridPrefs.spacingPresets, id: \.self) { v in
-                    Toggle(GridPrefs.spacingLabel(v), isOn: Binding(get: { abs(gridSpacing - v) < 1e-9 }, set: { if $0 { gridSpacing = v } }))
-                }
-                if !GridPrefs.spacingPresets.contains(where: { abs($0 - gridSpacing) < 1e-9 }) {
-                    Toggle(GridPrefs.spacingLabel(gridSpacing), isOn: .constant(true))
-                }
-                Divider()
-                Button("Other…") { GridPrefs.askForCustomSpacing() }
-            }
-            Menu("Major Lines") {
-                ForEach(GridPrefs.majorPresets, id: \.self) { n in
-                    Toggle(n == 1 ? "None" : "Every \(n) lines", isOn: Binding(get: { majorEvery == n }, set: { if $0 { majorEvery = n } }))
-                }
-            }
-            Toggle("Haptic Feedback When Snapping", isOn: $haptics)
-            Divider()
-            Button("Show Inspector") { state?.showInspector.toggle() }
-                .keyboardShortcut("i", modifiers: [.command, .option])
+        CommandGroup(before: .toolbar) {
+            ViewMenuItems(state: state)
         }
     }
 }
 
+/// Menu items observe the editor so they enable and disable with the selection.
+struct EditMenuItems: View {
+    @ObservedObject var state: EditorState
+
+    var body: some View {
+        Button("Select All") { state.selectAll() }
+            .keyboardShortcut("a", modifiers: .command)
+        Button("Deselect All") { state.deselectAll() }
+            .keyboardShortcut("a", modifiers: [.command, .shift])
+        Button("Duplicate") { state.duplicateSelection() }
+            .keyboardShortcut("d", modifiers: .command)
+            .disabled(state.selection.isEmpty)
+    }
+}
+
+struct ObjectMenuItems: View {
+    @ObservedObject var state: EditorState
+
+    private var hasGroup: Bool {
+        state.selectedObjects.contains { if case .group = $0.shape { return true } else { return false } }
+    }
+
+    var body: some View {
+        Button("Group") { state.groupSelection() }
+            .keyboardShortcut("g", modifiers: .command)
+            .disabled(state.selection.count < 2)
+        Button("Ungroup") { state.ungroupSelection() }
+            .keyboardShortcut("g", modifiers: [.command, .shift])
+            .disabled(!hasGroup)
+        Divider()
+        Button("Make Path") { state.makePath() }
+            .keyboardShortcut("h", modifiers: .command)
+            .disabled(state.selection.isEmpty)
+        Button("Explode…") { state.requestExplode() }
+            .keyboardShortcut("e", modifiers: .command)
+            .disabled(state.selection.isEmpty)
+        Divider()
+        Button("Bring to Front") { state.arrange(.front) }
+            .keyboardShortcut("]", modifiers: [.command, .option])
+            .disabled(state.selection.isEmpty)
+        Button("Bring Forward") { state.arrange(.forward) }
+            .keyboardShortcut("]", modifiers: .command)
+            .disabled(state.selection.isEmpty)
+        Button("Send Backward") { state.arrange(.backward) }
+            .keyboardShortcut("[", modifiers: .command)
+            .disabled(state.selection.isEmpty)
+        Button("Send to Back") { state.arrange(.back) }
+            .keyboardShortcut("[", modifiers: [.command, .option])
+            .disabled(state.selection.isEmpty)
+        Divider()
+        AlignMenu(state: state)
+        Divider()
+        ForEach(Tool.allCases) { tool in
+            Button("\(tool.title) Tool") { state.tool = tool }
+                .keyboardShortcut(KeyEquivalent(tool.shortcut), modifiers: [.command, .control])
+        }
+    }
+}
+
+/// Zoom and grid, in the standard View menu.
+struct ViewMenuItems: View {
+    let state: EditorState?
+    @AppStorage(GridPrefs.showGridKey) private var showGrid = true
+    @AppStorage(GridPrefs.snapToGridKey) private var gridLock = true
+    @AppStorage(GridPrefs.snapToObjectsKey) private var snapToObjects = true
+    @AppStorage(GridPrefs.gridSpacingKey) private var gridSpacing = 10.0
+    @AppStorage(GridPrefs.majorEveryKey) private var majorEvery = 1
+    @AppStorage(GridPrefs.hapticsKey) private var haptics = true
+
+    var body: some View {
+        Button("Zoom In") { state?.zoom(by: 1.25) }
+            .keyboardShortcut("=", modifiers: .command)
+        Button("Zoom Out") { state?.zoom(by: 1 / 1.25) }
+            .keyboardShortcut("-", modifiers: .command)
+        Button("Zoom to Fit") { state?.needsZoomToFit = true }
+            .keyboardShortcut("0", modifiers: .command)
+        Divider()
+        Toggle("Show Grid", isOn: $showGrid)
+            .keyboardShortcut("'", modifiers: .command)
+        Toggle("Grid Lock", isOn: $gridLock)
+            .keyboardShortcut("l", modifiers: .command)
+        Toggle("Snap to Objects", isOn: $snapToObjects)
+            .keyboardShortcut("'", modifiers: [.command, .shift])
+        Menu("Grid Spacing") {
+            ForEach(GridPrefs.spacingPresets, id: \.self) { v in
+                Toggle(GridPrefs.spacingLabel(v), isOn: Binding(get: { abs(gridSpacing - v) < 1e-9 }, set: { if $0 { gridSpacing = v } }))
+            }
+            if !GridPrefs.spacingPresets.contains(where: { abs($0 - gridSpacing) < 1e-9 }) {
+                Toggle(GridPrefs.spacingLabel(gridSpacing), isOn: .constant(true))
+            }
+            Divider()
+            Button("Other…") { GridPrefs.askForCustomSpacing() }
+        }
+        Menu("Major Lines") {
+            ForEach(GridPrefs.majorPresets, id: \.self) { n in
+                Toggle(n == 1 ? "None" : "Every \(n) lines", isOn: Binding(get: { majorEvery == n }, set: { if $0 { majorEvery = n } }))
+            }
+        }
+        Toggle("Haptic Feedback When Snapping", isOn: $haptics)
+        Divider()
+        Button("Show Inspector") { state?.showInspector.toggle() }
+            .keyboardShortcut("i", modifiers: [.command, .option])
+        Divider()
+    }
+}
 
 /// The toolbar's align menu. Observes the editor so it enables as soon as something is selected.
 struct ToolbarAlignMenu: View {
