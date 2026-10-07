@@ -128,8 +128,8 @@ public enum PathOps {
     public static func explodeFully(_ object: DesignObject) -> [DesignObject] {
         if isPrimitive(object) { return [object] }
         let parts = explode(object)
-        if parts.count == 1 {
-            // A single run: cut it into segments.
+        if parts.count == 1, parts[0].shape == object.shape {
+            // Nothing split: this is a single run, so cut it into segments.
             guard let run = chains(of: object).first, run.segments.count > 1 else { return parts }
             var from = run.start
             return run.segments.map { seg in
