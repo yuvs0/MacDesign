@@ -166,15 +166,16 @@ final class DrawingCanvas: NSView {
         options.minimumStrokeWidth = 1.0 / Double(s.zoom)
         let live = liveTransform()
         for o in doc.objects {
+            var drawn = o
             if let m = live, s.selection.contains(o.id) {
-                Renderer.draw(Geometry.transform(o, by: m), in: ctx, doc: doc, options: options)
+                drawn = Geometry.transform(o, by: m)
             } else if case .editPoint(let id, _, let path, let original, true) = drag, o.id == id {
-                var edited = o
-                edited.shape = PathEditing.shape(after: path, original: original)
-                Renderer.draw(edited, in: ctx, doc: doc, options: options)
-            } else {
-                Renderer.draw(o, in: ctx, doc: doc, options: options)
+                drawn.shape = PathEditing.shape(after: path, original: original)
             }
+            if s.selection.contains(o.id), s.tool != .pen {
+                drawHalo(drawn, in: ctx, state: s)
+            }
+            Renderer.draw(drawn, in: ctx, doc: doc, options: options)
         }
         drawPreview(in: ctx, state: s)
         ctx.restoreGState()
@@ -201,13 +202,6 @@ final class DrawingCanvas: NSView {
         let accent = NSColor.controlAccentColor.cgColor
         ctx.setStrokeColor(accent)
         ctx.setLineWidth(1)
-        // Outline every selected object faintly so the user can see what's selected.
-        for o in s.selectedObjects {
-            guard let b = s.objectBounds(o) else { continue }
-            ctx.setLineDash(phase: 0, lengths: [3, 3])
-            ctx.stroke(viewRect(b).insetBy(dx: -2, dy: -2))
-        }
-        ctx.setLineDash(phase: 0, lengths: [])
         guard let (_, path) = directPath(s) else { return }
         // Handles of selected anchors first, so anchors draw over them.
         for i in s.selectedAnchors {
@@ -432,31 +426,48 @@ final class DrawingCanvas: NSView {
         }
     }
 
+    /// A thin outline in the highlight colour just outside the object's own stroke. Drawn
+    /// under the object, so only the part that sticks out past the stroke or fill shows.
+    private func drawHalo(_ o: DesignObject, in ctx: CGContext, state s: EditorState) {
+        guard let path = haloPath(o) else { return }
+        let px = 1.0 / Double(s.zoom)
+        ctx.saveGState()
+        ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
+        ctx.setLineJoin(.round)
+        ctx.setLineCap(.round)
+        let own = o.style.isStroked ? max(o.style.effectiveStrokeWidth, px) : 0
+        ctx.setLineWidth(own + 2 * 2.5 * px)
+        ctx.addPath(path)
+        ctx.strokePath()
+        ctx.restoreGState()
+    }
+
+    private func haloPath(_ o: DesignObject) -> CGPath? {
+        switch o.shape {
+        case .point(let p):
+            return CGPath(ellipseIn: CGRect(x: p.x - 0.6, y: p.y - 0.6, width: 1.2, height: 1.2), transform: nil)
+        case .group(let kids):
+            let m = CGMutablePath()
+            for k in kids { if let kp = haloPath(k) { m.addPath(kp) } }
+            return m
+        default:
+            return Renderer.cgPath(for: o.shape)
+        }
+    }
+
     private func drawSelection(in ctx: CGContext, state s: EditorState, live: Affine?) {
         guard s.tool != .pen else { return }
         let accent = NSColor.controlAccentColor.cgColor
         ctx.setStrokeColor(accent)
         ctx.setLineWidth(1)
-        for o in s.selectedObjects {
-            guard var b = s.objectBounds(o) else { continue }
-            if let m = live { b = TSDRect(p1: m.apply(TSDPoint(x: b.minX, y: b.minY)), p2: m.apply(TSDPoint(x: b.maxX, y: b.maxY))) }
-            let r = viewRect(b)
-            ctx.setLineDash(phase: 0, lengths: [])
-            ctx.stroke(r.insetBy(dx: -1, dy: -1))
-        }
-        if var b = s.selectionBounds {
+        if var b = s.selectionBounds, live == nil, s.selectedObjects.allSatisfy({ s.isEditable($0) }) {
             if let m = live { b = TSDRect(p1: m.apply(TSDPoint(x: b.minX, y: b.minY)), p2: m.apply(TSDPoint(x: b.maxX, y: b.maxY))) }
             let r = viewRect(b).insetBy(dx: -handleInset(s), dy: -handleInset(s))
-            ctx.setLineDash(phase: 0, lengths: [4, 3])
-            ctx.stroke(r)
-            ctx.setLineDash(phase: 0, lengths: [])
-            if live == nil, s.selectedObjects.allSatisfy({ s.isEditable($0) }) {
-                for p in handlePoints(r) {
-                    let hr = CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)
-                    ctx.setFillColor(CGColor(gray: 1, alpha: 1))
-                    ctx.fill(hr)
-                    ctx.stroke(hr)
-                }
+            for p in handlePoints(r) {
+                let hr = CGRect(x: p.x - 4.5, y: p.y - 4.5, width: 9, height: 9)
+                ctx.setFillColor(CGColor(gray: 1, alpha: 1))
+                ctx.fill(hr)
+                ctx.stroke(hr)
             }
         }
         if case .marquee(let a, let c) = drag {
@@ -524,9 +535,9 @@ final class DrawingCanvas: NSView {
         }
     }
 
-    /// Handles sit further out from text so they don't cover the letters.
+    /// Handles sit clear of the object, and further still from text so they don't cover the letters.
     private func handleInset(_ s: EditorState) -> CGFloat {
-        s.selectedObjects.allSatisfy { if case .text = $0.shape { return true } else { return false } } ? 10 : 3
+        s.selectedObjects.allSatisfy { if case .text = $0.shape { return true } else { return false } } ? 16 : 12
     }
 
     private func handleIndex(at viewPoint: CGPoint) -> Int? {
