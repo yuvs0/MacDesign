@@ -3,9 +3,39 @@ import TSDKit
 
 /// Grid and snapping preferences, shared by all windows and kept in user defaults.
 /// The View menu edits them through @AppStorage with the same keys.
+/// 2D Design's lock modes: grid lock snaps to the grid, step lock to the 1 mm sub-grid.
+enum LockMode: String, CaseIterable {
+    case grid, step, none
+
+    var title: String {
+        switch self {
+        case .grid: return "Grid Lock"
+        case .step: return "Step Lock"
+        case .none: return "No Lock"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .grid: return "squareshape.split.2x2"
+        case .step: return "squareshape.split.3x3"
+        case .none: return "circle.dashed"
+        }
+    }
+
+    var next: LockMode {
+        switch self {
+        case .grid: return .step
+        case .step: return .none
+        case .none: return .grid
+        }
+    }
+}
+
 enum GridPrefs {
     static let showGridKey = "showGrid"
-    static let snapToGridKey = "snapToGrid"
+    static let lockModeKey = "lockMode"
+    static let stepSpacing = 1.0
     static let snapToObjectsKey = "snapToObjects"
     static let gridSpacingKey = "gridSpacing"
     static let majorEveryKey = "gridMajorEvery"
@@ -18,7 +48,7 @@ enum GridPrefs {
         UserDefaults.standard.register(defaults: [
             // 2D Design's defaults: a 10 mm grid with grid lock on.
             showGridKey: true,
-            snapToGridKey: true,
+            lockModeKey: LockMode.grid.rawValue,
             snapToObjectsKey: true,
             gridSpacingKey: 10.0,
             majorEveryKey: 1,
@@ -27,7 +57,9 @@ enum GridPrefs {
     }
 
     static var showGrid: Bool { UserDefaults.standard.bool(forKey: showGridKey) }
-    static var snapToGrid: Bool { UserDefaults.standard.bool(forKey: snapToGridKey) }
+    static var lockMode: LockMode {
+        LockMode(rawValue: UserDefaults.standard.string(forKey: lockModeKey) ?? "") ?? .grid
+    }
     static var snapToObjects: Bool { UserDefaults.standard.bool(forKey: snapToObjectsKey) }
     static var haptics: Bool { UserDefaults.standard.bool(forKey: hapticsKey) }
     static var spacing: Double {
@@ -92,7 +124,11 @@ struct Snapper {
     init(state: EditorState, excluding: Set<UUID>, enabled: Bool) {
         tolerance = 6 / Double(state.zoom)
         guard enabled else { return }
-        if GridPrefs.snapToGrid { gridSpacing = GridPrefs.spacing }
+        switch GridPrefs.lockMode {
+        case .grid: gridSpacing = GridPrefs.spacing
+        case .step: gridSpacing = GridPrefs.stepSpacing
+        case .none: gridSpacing = nil
+        }
         guard GridPrefs.snapToObjects else { return }
         let page = state.doc.pageSize
         for x in [0, page.width / 2, page.width] { xs.append(Target(value: x, span: 0...page.height)) }

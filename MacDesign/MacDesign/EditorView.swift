@@ -73,6 +73,8 @@ struct EditorToolbar: ToolbarContent {
             }
             .help("Export the drawing for other software")
 
+            LockControls()
+
             ToolbarAlignMenu(state: state)
                 .help("Align or distribute the selected objects")
 
@@ -277,7 +279,7 @@ struct ObjectMenuItems: View {
 struct ViewMenuItems: View {
     let state: EditorState?
     @AppStorage(GridPrefs.showGridKey) private var showGrid = true
-    @AppStorage(GridPrefs.snapToGridKey) private var gridLock = true
+    @AppStorage(GridPrefs.lockModeKey) private var lockMode = LockMode.grid.rawValue
     @AppStorage(GridPrefs.snapToObjectsKey) private var snapToObjects = true
     @AppStorage(GridPrefs.gridSpacingKey) private var gridSpacing = 10.0
     @AppStorage(GridPrefs.majorEveryKey) private var majorEvery = 1
@@ -293,7 +295,11 @@ struct ViewMenuItems: View {
         Divider()
         Toggle("Show Grid", isOn: $showGrid)
             .keyboardShortcut("'", modifiers: .command)
-        Toggle("Grid Lock", isOn: $gridLock)
+        Picker("Lock", selection: $lockMode) {
+            ForEach(LockMode.allCases, id: \.rawValue) { Label($0.title, systemImage: $0.systemImage).tag($0.rawValue) }
+        }
+        .pickerStyle(.inline)
+        Button("Cycle Lock") { lockMode = (LockMode(rawValue: lockMode) ?? .grid).next.rawValue }
             .keyboardShortcut("l", modifiers: .command)
         Toggle("Snap to Objects", isOn: $snapToObjects)
             .keyboardShortcut("'", modifiers: [.command, .shift])
@@ -369,6 +375,32 @@ struct AlignMenuItems: View {
                 Divider()
                 Text("One object aligns to the page")
             }
+        }
+    }
+}
+
+
+/// Joined pair in the toolbar: the lock mode (cycles grid, step, none) and object snapping.
+struct LockControls: View {
+    @AppStorage(GridPrefs.lockModeKey) private var lockMode = LockMode.grid.rawValue
+    @AppStorage(GridPrefs.snapToObjectsKey) private var snapToObjects = true
+
+    private var mode: LockMode { LockMode(rawValue: lockMode) ?? .grid }
+
+    var body: some View {
+        ControlGroup {
+            Button {
+                withAnimation(.snappy) { lockMode = mode.next.rawValue }
+            } label: {
+                Label(mode.title, systemImage: mode.systemImage)
+                    .contentTransition(.symbolEffect(.replace.downUp))
+            }
+            .help("\(mode.title): click to change. Grid lock snaps to the grid, step lock to every millimetre.")
+
+            Toggle(isOn: $snapToObjects) {
+                Label("Snap", systemImage: "point.3.connected.trianglepath.dotted")
+            }
+            .help("Snap to the edges and centres of other objects and the page")
         }
     }
 }

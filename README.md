@@ -51,9 +51,11 @@ swift run tsdconv --format svg -o ~/Desktop/out ~/Downloads/  # whole folder
   delete layers. The active layer receives new shapes.
 - **Snapping**: while you draw, move or resize, edges, centres and corners snap to other
   objects and to the page, with pink guide lines and a trackpad click when a snap engages.
-  Hold ⌘ to drag without snapping. **View > Grid Lock** (⌘L) snaps everything to the
-  grid, as 2D Design does by default; **Snap to Objects** (⇧⌘') and **Haptic Feedback
-  When Snapping** turn the other two off.
+  Hold ⌘ to drag without snapping. The joined pair of buttons in the toolbar sets the
+  lock and the snap: the left one cycles **Grid Lock** (everything snaps to the grid, as
+  2D Design does by default), **Step Lock** (snaps to every millimetre) and no lock (⌘L
+  cycles too); the right one toggles snapping to objects and the page. Both are in the
+  View menu as well, with **Haptic Feedback When Snapping**.
 - **Grid**: 10 mm by default, shown with **View > Show Grid** (⌘'). Spacing comes from the
   **Grid Spacing** submenu (or **Other…** for any value), with optional heavier major
   lines every few lines.
