@@ -112,18 +112,18 @@ public struct RGB: Equatable, Hashable, Codable, Sendable {
 public enum LineType: Int, Codable, Sendable, CaseIterable {
     case none = 0
     case solid = 1
-    // 2D Design's three broken patterns. Which is which is a guess from the test file.
-    case dashed = 2
-    case dotted = 3
-    case dashDot = 4
+    /// 2D Design's broken patterns, repeating every `Style.dashScale` mm (1 by default).
+    case dotted = 2
+    case dashed = 3
+    case longDash = 4
 
     public var name: String {
         switch self {
         case .none: return "None"
         case .solid: return "Solid"
-        case .dashed: return "Dashed"
         case .dotted: return "Dotted"
-        case .dashDot: return "Dash-dot"
+        case .dashed: return "Dashed"
+        case .longDash: return "Long dash"
         }
     }
 }
@@ -160,30 +160,45 @@ public struct GradientStop: Equatable, Hashable, Codable, Sendable {
     }
 }
 
-/// Linear gradient. Start and end are in the unit square of the shape's bounds (y up).
+/// Linear gradient across the shape's bounds.
 public struct Gradient: Equatable, Hashable, Codable, Sendable {
     public var stops: [GradientStop]
-    public var start: TSDPoint
-    public var end: TSDPoint
+    /// Direction in degrees anticlockwise from +x; 0 runs left to right.
+    public var angle: Double
 
-    public init(stops: [GradientStop], start: TSDPoint = TSDPoint(x: 0.5, y: 1), end: TSDPoint = TSDPoint(x: 0.5, y: 0)) {
+    public init(stops: [GradientStop], angle: Double = 0) {
         self.stops = stops
-        self.start = start
-        self.end = end
+        self.angle = angle
+    }
+
+    /// Start and end in the unit square of the shape's bounds (y up).
+    public var start: TSDPoint {
+        let r = angle * .pi / 180
+        return TSDPoint(x: 0.5 - 0.5 * cos(r), y: 0.5 - 0.5 * sin(r))
+    }
+
+    public var end: TSDPoint {
+        let r = angle * .pi / 180
+        return TSDPoint(x: 0.5 + 0.5 * cos(r), y: 0.5 + 0.5 * sin(r))
     }
 }
 
-/// Pattern fill. 2D Design keeps a tile (kind 5: a small drawing; kind 4: a character
-/// pattern) and how it repeats. Only the tile shapes are decoded; the rest is kept as is.
+/// Texture (kind 4: an image from the file's texture table) or pattern (kind 5: a small
+/// drawing), repeated in tiles of `tileSize` mm from the shape's top-left corner.
 public struct FillPattern: Equatable, Hashable, Codable, Sendable {
+    public static let texture = 4
+    public static let drawing = 5
+
     public var kind: Int
     public var background: RGB?
     public var tile: [DesignObject]
+    public var tileSize: TSDSize
 
-    public init(kind: Int, background: RGB? = nil, tile: [DesignObject] = []) {
+    public init(kind: Int, background: RGB? = nil, tile: [DesignObject] = [], tileSize: TSDSize = TSDSize(width: 20, height: 20)) {
         self.kind = kind
         self.background = background
         self.tile = tile
+        self.tileSize = tileSize
     }
 }
 
@@ -200,7 +215,7 @@ public enum Fill: Equatable, Hashable, Codable, Sendable {
         case .solid: return "Solid"
         case .hatch: return "Hatch"
         case .gradient: return "Gradient"
-        case .pattern: return "Pattern"
+        case .pattern(let p): return p.kind == FillPattern.texture ? "Texture" : "Pattern"
         }
     }
 
@@ -304,7 +319,7 @@ public struct TextData: Equatable, Hashable, Codable, Sendable {
     /// Second point stored with the text. Meaning not confirmed; preserved on round trip.
     public var anchor: TSDPoint
     public var fontFace: String
-    /// Nominal size in mm (the value 2D Design keeps at the end of the font record).
+    /// Text height in mm: the height of capital letters, as 2D Design measures it.
     public var fontSize: Double
     public var isBold: Bool
     public var isItalic: Bool
@@ -339,8 +354,9 @@ public struct TextData: Equatable, Hashable, Codable, Sendable {
         self.rawFontTail = rawFontTail
     }
 
-    /// Em size in mm as drawn.
-    public var renderedSize: Double { fontSize * scaleY }
+    /// Approximate em size in mm as drawn. `fontSize` is 2D Design's text height, the
+    /// height of capitals; Renderer uses the real font's cap height instead of 0.716 (Arial).
+    public var renderedSize: Double { fontSize * scaleY / 0.716 }
 }
 
 public indirect enum Shape: Equatable, Hashable, Codable, Sendable {
@@ -439,7 +455,7 @@ public struct DesignObject: Identifiable, Equatable, Hashable, Codable, Sendable
         if let name { return name }
         switch recordType {
         case Record.Kind.dimension.rawValue?: return "Dimension"
-        case Record.Kind.arrow.rawValue?: return "Arrow"
+        case Record.Kind.doubleLine.rawValue?: return "Double line"
         default: return shape.kindName
         }
     }
@@ -490,6 +506,9 @@ public struct TSDDocument: Equatable, Codable, Sendable {
     public var objects: [DesignObject]
     /// Everything before the layer table: header, textures, hidden template graphic, page setup.
     public var prefix: Data
+    /// JPEG images from the prefix's texture table, used by texture fills. Not saved
+    /// separately (the prefix holds them).
+    public var textures: [Data] = []
     /// Hatch, pen and settings tables between the layers and the objects.
     public var middle: Data
     public var trailer: Data

@@ -9,9 +9,9 @@ TRAILER = bytes.fromhex("0000000000010001000100000000000000010001000100000000000
 MIDDLE_END = bytes.fromhex("1900090000000300")
 KINDS = {0x00: "font", 0x02: "point", 0x05: "line", 0x06: "circle", 0x07: "arc", 0x08: "bezier",
          0x09: "path", 0x0A: "group", 0x0B: "glyph", 0x0C: "text", 0x0D: "dimension",
-         0x0E: "container", 0x17: "arrow"}
-FILLS = ["none", "solid", "hatch", "gradient", "char pattern", "shape pattern"]
-LINES = ["none", "solid", "dashed", "dotted", "dash-dot"]
+         0x0E: "container", 0x17: "double line"}
+FILLS = ["none", "solid", "hatch", "gradient", "texture", "shape pattern"]
+LINES = ["none", "solid", "dotted", "dashed", "long dash"]
 
 
 class GrammarError(Exception):
@@ -158,9 +158,9 @@ class P:
             self.header(); self.line(); self.fill(depth)
             return "label " + self.text_body(depth)
         if t == 0x17:
-            self.expect(b"\x01\x00", "arrow"); self.raw(49)
+            self.expect(b"\x01\x00", "double line"); self.raw(49)
             self.header(); self.line(); self.fill(depth)
-            self.expect(b"\x04\x00\x00\x00\x03\x00", "arrow")
+            self.expect(b"\x04\x00\x00\x00\x03\x00", "double line")
             return self.children(depth)
         raise GrammarError(f"no body grammar for type {t:#x}")
 

@@ -293,16 +293,17 @@ public enum TSDWriter {
         return w.data
     }
 
-    /// The 90 bytes after the LOGFONT: two metrics, the anchor point and the size.
+    /// The 90 bytes after the LOGFONT: text height, a tenth of it, the anchor point, and a
+    /// 5 / -5 pair seen in every file.
     static func makeFontTail(_ t: TextData) -> Data {
         var w = BinaryWriter()
         w.bytes([0x00, 0x00])
-        w.f64(t.fontSize * 0.893)      // observed: close to the font's ascent in mm
-        w.f64(t.fontSize * 0.0895)     // observed: close to the descent in mm
+        w.f64(t.fontSize)
+        w.f64(t.fontSize * 0.1)
         w.zeros(12)
         w.f64(t.anchor.x); w.f64(t.anchor.y)
         w.zeros(28)
-        w.f64(t.fontSize); w.f64(-t.fontSize)
+        w.f64(5); w.f64(-5)
         return w.data
     }
 }

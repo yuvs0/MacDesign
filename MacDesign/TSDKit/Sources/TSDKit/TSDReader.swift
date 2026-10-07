@@ -34,7 +34,8 @@ enum Record {
         case dimension = 0x0D
         /// Group-like container; seen holding the tile of a pattern fill.
         case container = 0x0E
-        case arrow = 0x17
+        /// A path drawn as two parallel outlines a set width apart.
+        case doubleLine = 0x17
     }
 
     static let logFontLength = 92
@@ -128,8 +129,26 @@ public enum TSDReader {
         }
         let trailer = try r.readBytes(r.remaining)
 
-        return TSDDocument(signature: sig.value, version: version, pageName: pageName, pageSize: pageSize,
-                           layers: layers, objects: objects, prefix: prefix, middle: middle, trailer: trailer)
+        var doc = TSDDocument(signature: sig.value, version: version, pageName: pageName, pageSize: pageSize,
+                              layers: layers, objects: objects, prefix: prefix, middle: middle, trailer: trailer)
+        doc.textures = textures(in: prefix)
+        return doc
+    }
+
+    /// JPEG images in the prefix (the texture table), each preceded by its UInt32 length
+    /// and four zero bytes.
+    static func textures(in prefix: Data) -> [Data] {
+        let r = BinaryReader(prefix)
+        var result: [Data] = []
+        var from = 0
+        while let s = r.find([0xFF, 0xD8, 0xFF], from: from) {
+            from = s + 3
+            guard s >= 8, let n = r.u32(s - 8), n > 3, s + Int(n) <= r.count,
+                  r.peek([0xFF, 0xD9], at: s + Int(n) - 2) else { continue }
+            result.append(Data(r.bytes[s..<(s + Int(n))]))
+            from = s + Int(n)
+        }
+        return result
     }
 
     static func numbersBeforeMM(_ s: String) -> [Double] {
@@ -267,12 +286,15 @@ public enum TSDReader {
                 let flags = try r.readBytes(2)
                 let dashes = try r.readU16()
                 _ = try r.readBytes(16 * Int(dashes))
-                // Spacing appears to be in tenths of a millimetre (40 in the test file).
+                // 40 draws lines 0.5 mm apart in 2D Design.
                 fill = .hatch(Hatch(color: line.color, lineWidth: line.width, angle: angle,
-                                    spacing: max(0.2, spacing * (scale > 0 ? scale : 1) / 10),
+                                    spacing: max(0.05, spacing * (scale > 0 ? scale : 1) / 80),
                                     isCrossed: flags.first == 1))
             } else {
-                _ = try r.readBytes(15 + 48 + 74)
+                _ = try r.readBytes(15)
+                let tileWidth = try r.readF64(), tileHeight = try r.readF64()
+                _ = try r.readBytes(32 + 74)
+                let tileSize = TSDSize(width: tileWidth > 0 ? tileWidth : 20, height: tileHeight > 0 ? tileHeight : 20)
                 let hasBackground = try r.readU8() != 0
                 let background = RGB(colorref: try r.readU32())
                 switch type {
@@ -283,7 +305,8 @@ public enum TSDReader {
                     let n1 = try r.readU16()
                     _ = try r.readBytes(8 * Int(n1))
                     let n2 = try r.readU16()
-                    _ = try r.readBytes(8 * Int(n2) + 4)
+                    _ = try r.readBytes(8 * Int(n2))
+                    let angle = try readF32(&r)
                     let n3 = try r.readU16()
                     var stops: [GradientStop] = []
                     for _ in 0..<n3 {
@@ -291,7 +314,7 @@ public enum TSDReader {
                         stops.append(GradientStop(color: c, position: try readF32(&r)))
                     }
                     _ = try r.readBytes(17)
-                    fill = .gradient(Gradient(stops: stops))
+                    fill = .gradient(Gradient(stops: stops, angle: angle))
                 case 4:
                     _ = try readHeader(&r)
                     _ = try readLine(&r)
@@ -303,12 +326,13 @@ public enum TSDReader {
                         if r.offset >= r.count { throw TSDError.unexpected("end of pattern fill", at: from) }
                     }
                     _ = try r.readBytes(50 + 59)
-                    fill = .pattern(FillPattern(kind: 4, background: hasBackground ? background : nil))
+                    fill = .pattern(FillPattern(kind: FillPattern.texture, background: hasBackground ? background : nil, tileSize: tileSize))
                 case 5:
                     let tile = try readTypedObject(&r)
                     var shapes = [tile]
                     if case .group(let kids) = tile.shape { shapes = kids }
-                    fill = .pattern(FillPattern(kind: 5, background: hasBackground ? background : nil, tile: shapes))
+                    fill = .pattern(FillPattern(kind: FillPattern.drawing, background: hasBackground ? background : nil,
+                                                tile: shapes, tileSize: tileSize))
                 default:
                     throw TSDError.unexpected("fill type \(type)", at: start)
                 }
@@ -432,8 +456,8 @@ public enum TSDReader {
         case .dimension:
             object.shape = .group(try readDimension(&r, style: object.style))
 
-        case .arrow:
-            object.shape = .group(try readArrow(&r, style: object.style))
+        case .doubleLine:
+            object.shape = .group(try readDoubleLine(&r, style: object.style))
 
         case .font, .glyph:
             throw TSDError.unexpected("object", at: start)
@@ -497,8 +521,12 @@ public enum TSDReader {
             k += 2
         }
         let weight = Int(lf[16]) | (Int(lf[17]) << 8)
+        // Text height (capitals) is the first double of the tail; the one near the end is 5
+        // in every file and isn't the size.
         var size = 5.0
-        if let s = BinaryReader(fontBody.tail).f64(74), s.isFinite, s > 0.1, s < 1000 { size = s }
+        let tailReader = BinaryReader(fontBody.tail)
+        if let s = tailReader.f64(2), s.isFinite, s > 0.05, s < 1000 { size = s }
+        else if let s = tailReader.f64(74), s.isFinite, s > 0.1, s < 1000 { size = s }
         var t = TextData(string: string, origin: origin, fontFace: face.isEmpty ? "Arial" : face, fontSize: size,
                          scaleX: sx, scaleY: sy, anchor: anchor,
                          isBold: weight >= 600, isItalic: lf[20] != 0,
@@ -527,7 +555,7 @@ public enum TSDReader {
         return GlyphBody(char: ch, position: p, logFont: lf, tail: tail)
     }
 
-    // MARK: Dimensions and arrows
+    // MARK: Dimensions and double lines
     //
     // Both are kept verbatim for saving. For display they are expanded into ordinary shapes;
     // once edited they are saved as a group of those shapes.
@@ -578,33 +606,30 @@ public enum TSDReader {
         return parts
     }
 
-    /// Arrow: head sizes, then the shaft as an untyped group of lines.
-    static func readArrow(_ r: inout BinaryReader, style: Style) throws -> [DesignObject] {
+    /// Double line: widths, then the centre line as an untyped group of lines. 2D Design
+    /// draws only the two outlines, `width` apart, joined by square ends.
+    static func readDoubleLine(_ r: inout BinaryReader, style: Style) throws -> [DesignObject] {
         let start = r.offset
-        try r.expect([0x01, 0x00], "arrow")
+        try r.expect([0x01, 0x00], "double line")
         _ = try r.readBytes(49)
-        let b = BinaryReader(Data(r.bytes[start..<r.offset]))
-        let startHead = (b.f64(16) ?? 5, b.f64(24) ?? 5)
-        let endHead = (b.f64(34) ?? 5, b.f64(42) ?? 5)
+        let width = BinaryReader(Data(r.bytes[start..<r.offset])).f64(4) ?? 5
 
-        let shaft = try readHeader(&r)
-        let shaftLine = try readLine(&r)
-        let (shaftFill, _) = try readFill(&r)
-        try r.expect(Record.groupTag, "arrow")
+        let centre = try readHeader(&r)
+        _ = try readLine(&r)
+        _ = try readFill(&r)
+        try r.expect(Record.groupTag, "double line")
         let lines = try readChildren(&r)
-        _ = shaft; _ = shaftLine; _ = shaftFill
 
-        var parts = lines
-        let ends = lines.compactMap { o -> (TSDPoint, TSDPoint)? in
-            if case .line(let a, let b) = o.shape { return (a, b) } else { return nil }
+        var points: [TSDPoint] = []
+        for o in lines {
+            guard case .line(let a, let b) = o.shape else { continue }
+            if points.isEmpty || !Geometry.near(points[points.count - 1], a, 1e-6) { points.append(a) }
+            points.append(b)
         }
-        if let first = ends.first {
-            parts.append(arrowHead(tip: first.0, from: first.1, length: startHead.0, width: startHead.1, style: style, layer: Int(shaft.layer)))
-        }
-        if let last = ends.last {
-            parts.append(arrowHead(tip: last.1, from: last.0, length: endHead.0, width: endHead.1, style: style, layer: Int(shaft.layer)))
-        }
-        return parts
+        var outline = style
+        outline.fill = .none
+        guard let path = Geometry.doubleLineOutline(points, width: width) else { return lines }
+        return [DesignObject(layer: Int(centre.layer), style: outline, shape: .path(path))]
     }
 
     static func arrowHead(tip: TSDPoint, from: TSDPoint, length: Double, width: Double, style: Style, layer: Int) -> DesignObject {

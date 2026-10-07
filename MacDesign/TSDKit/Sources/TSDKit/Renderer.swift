@@ -2,6 +2,7 @@
 import Foundation
 import CoreGraphics
 import CoreText
+import ImageIO
 
 /// Draws documents into a CGContext whose units are millimetres with y pointing up
 /// (the file's own coordinate system). The app canvas, PDF and PNG export all use this.
@@ -33,6 +34,16 @@ public enum Renderer {
         }
         switch o.shape {
         case .group(let kids):
+            // A filled group is a compound shape: its members' outlines together.
+            if o.style.isFilled, let compound = compoundPath(kids) {
+                drawFill(o.style.fill, path: compound, in: ctx, doc: doc, options: options)
+                if o.style.isStroked, kids.allSatisfy({ !$0.style.isStroked }) {
+                    ctx.setStrokeColor(cgColor(options.strokeOverride ?? o.style.effectiveStroke))
+                    ctx.setLineWidth(max(o.style.effectiveStrokeWidth, options.minimumStrokeWidth))
+                    ctx.addPath(compound)
+                    ctx.strokePath()
+                }
+            }
             for k in kids { draw(k, in: ctx, doc: doc, options: options) }
         case .text(let t):
             drawText(t, style: o.style, in: ctx, options: options)
@@ -42,31 +53,68 @@ public enum Renderer {
             ctx.fillEllipse(in: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r))
         default:
             guard let path = cgPath(for: o.shape) else { return }
-            drawFill(o.style.fill, path: path, in: ctx, options: options)
+            drawFill(o.style.fill, path: path, in: ctx, doc: doc, options: options)
             guard o.style.isStroked else { return }
             ctx.saveGState()
             ctx.setStrokeColor(cgColor(options.strokeOverride ?? o.style.effectiveStroke))
             ctx.setLineWidth(max(o.style.effectiveStrokeWidth, options.minimumStrokeWidth))
             let dashes = dashPattern(o.style)
-            if !dashes.isEmpty { ctx.setLineDash(phase: 0, lengths: dashes) }
+            if !dashes.isEmpty {
+                ctx.setLineDash(phase: 0, lengths: dashes)
+                if o.style.lineType != .dotted { ctx.setLineCap(.butt) }
+            }
             ctx.addPath(path)
             ctx.strokePath()
             ctx.restoreGState()
         }
     }
 
-    /// Dash lengths in mm for broken line types.
+    /// Members' outlines joined into one path: a member that starts where the previous one
+    /// ended continues the same subpath (arcs and curves forming one closed outline);
+    /// otherwise it starts a new one (two circles making a ring).
+    public static func compoundPath(_ kids: [DesignObject]) -> CGPath? {
+        let path = CGMutablePath()
+        var start: TSDPoint?
+        var current: TSDPoint?
+        for k in kids {
+            guard let data = Geometry.path(for: k.shape), let first = data.segments.first else { continue }
+            let from: TSDPoint
+            if case .move(let p) = first { from = p } else { continue }
+            if let c = current, Geometry.near(c, from, 1e-3) {
+                // Continue the open subpath.
+            } else {
+                if current != nil, let s = start, let c = current, Geometry.near(s, c, 1e-3) { path.closeSubpath() }
+                path.move(to: CGPoint(x: from.x, y: from.y))
+                start = from
+            }
+            for seg in data.segments.dropFirst() {
+                switch seg {
+                case .move(let p): path.move(to: CGPoint(x: p.x, y: p.y)); start = p
+                case .line(let p): path.addLine(to: CGPoint(x: p.x, y: p.y))
+                case .curve(let c1, let c2, let e):
+                    path.addCurve(to: CGPoint(x: e.x, y: e.y), control1: CGPoint(x: c1.x, y: c1.y), control2: CGPoint(x: c2.x, y: c2.y))
+                }
+            }
+            current = data.segments.last?.endPoint
+            if data.isClosed { path.closeSubpath(); current = nil }
+        }
+        if let s = start, let c = current, Geometry.near(s, c, 1e-3) { path.closeSubpath() }
+        return path.isEmpty ? nil : path
+    }
+
+    /// Dash lengths in mm for broken line types. Each pattern repeats every `dashScale` mm
+    /// (2D Design's "wavelength", 1 mm by default).
     public static func dashPattern(_ s: Style) -> [CGFloat] {
         let k = CGFloat(s.dashScale > 0 ? s.dashScale : 1)
         switch s.lineType {
         case .none, .solid: return []
-        case .dashed: return [3 * k, 1.5 * k]
         case .dotted: return [0.01, 1 * k]
-        case .dashDot: return [3 * k, 1 * k, 0.01, 1 * k]
+        case .dashed: return [0.5 * k, 0.5 * k]
+        case .longDash: return [0.75 * k, 0.25 * k]
         }
     }
 
-    static func drawFill(_ fill: Fill, path: CGPath, in ctx: CGContext, options: Options) {
+    static func drawFill(_ fill: Fill, path: CGPath, in ctx: CGContext, doc: TSDDocument, options: Options) {
         switch fill {
         case .none:
             return
@@ -97,20 +145,51 @@ public enum Renderer {
             ctx.drawLinearGradient(gradient, start: unit(g.start), end: unit(g.end), options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
             ctx.restoreGState()
         case .pattern(let p):
-            // The tile's repeat isn't decoded yet: show the background with a light
-            // cross-hatch so the shape reads as pattern-filled.
+            let box = path.boundingBoxOfPath
             ctx.saveGState()
             ctx.addPath(path)
             ctx.clip(using: .evenOdd)
             ctx.setFillColor(cgColor(p.background ?? .white))
-            ctx.fill(path.boundingBoxOfPath)
-            hatchLines(path.boundingBoxOfPath, angle: 45, spacing: 1.2, in: ctx)
-            hatchLines(path.boundingBoxOfPath, angle: -45, spacing: 1.2, in: ctx)
-            ctx.setStrokeColor(CGColor(gray: 0.6, alpha: 1))
-            ctx.setLineWidth(max(0.12, options.minimumStrokeWidth))
-            ctx.strokePath()
+            ctx.fill(box)
+            let image = p.kind == FillPattern.texture ? doc.textures.first.flatMap(textureImage) : nil
+            let tileBounds = p.tile.compactMap { Geometry.bounds(of: $0) }.reduce(nil as TSDRect?) { acc, r in acc?.union(r) ?? r }
+            let tw = CGFloat(max(p.tileSize.width, 0.5)), th = CGFloat(max(p.tileSize.height, 0.5))
+            // Tiles start at the shape's top-left corner.
+            var y = box.maxY
+            while y > box.minY {
+                var x = box.minX
+                while x < box.maxX {
+                    let cell = CGRect(x: x, y: y - th, width: tw, height: th)
+                    if let image {
+                        ctx.draw(image, in: cell)
+                    } else if let tb = tileBounds, tb.width > 0, tb.height > 0 {
+                        ctx.saveGState()
+                        ctx.translateBy(x: cell.minX, y: cell.minY)
+                        ctx.scaleBy(x: tw / CGFloat(tb.width), y: th / CGFloat(tb.height))
+                        ctx.translateBy(x: -CGFloat(tb.minX), y: -CGFloat(tb.minY))
+                        var tileOptions = options
+                        tileOptions.respectVisibility = false
+                        tileOptions.minimumStrokeWidth = options.minimumStrokeWidth * CGFloat(tb.width) / tw
+                        for o in p.tile { draw(o, in: ctx, doc: doc, options: tileOptions) }
+                        ctx.restoreGState()
+                    }
+                    x += tw
+                }
+                y -= th
+            }
             ctx.restoreGState()
         }
+    }
+
+    private static let textureCache = TextureCache()
+
+    /// Decoded texture, cached by content.
+    static func textureImage(_ data: Data) -> CGImage? {
+        if let hit = textureCache.image(for: data) { return hit }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        textureCache.store(image, for: data)
+        return image
     }
 
     /// Adds parallel lines covering `box` to the current path.
@@ -172,14 +251,16 @@ public enum Renderer {
     // MARK: Text
 
     /// Resolves the font named in the file, falling back to the system font (SF Pro) when it isn't installed.
+    /// `fontSize` is the height of capitals, so the em size comes from the font's cap height.
     public static func font(for t: TextData) -> CTFont {
-        let size = CGFloat(max(t.renderedSize, 0.1))
-        var base: CTFont
-        if fontFamilyIsInstalled(t.fontFace) {
-            base = CTFontCreateWithName(t.fontFace as CFString, size, nil)
-        } else {
-            base = CTFontCreateUIFontForLanguage(.system, size, nil) ?? CTFontCreateWithName("Helvetica" as CFString, size, nil)
+        func make(_ size: CGFloat) -> CTFont {
+            if fontFamilyIsInstalled(t.fontFace) { return CTFontCreateWithName(t.fontFace as CFString, size, nil) }
+            return CTFontCreateUIFontForLanguage(.system, size, nil) ?? CTFontCreateWithName("Helvetica" as CFString, size, nil)
         }
+        let unit = make(100)
+        let capRatio = CTFontGetCapHeight(unit) / 100
+        let size = CGFloat(max(t.fontSize * t.scaleY, 0.05)) / (capRatio > 0.3 ? capRatio : 0.716)
+        var base = make(size)
         var traits: CTFontSymbolicTraits = []
         if t.isBold { traits.insert(.boldTrait) }
         if t.isItalic { traits.insert(.italicTrait) }
@@ -318,6 +399,20 @@ public enum Renderer {
         opts.minimumStrokeWidth = max(opts.minimumStrokeWidth, 1.5 / dotsPerMM)
         draw(doc, in: ctx, options: opts)
         return ctx.makeImage()
+    }
+}
+final class TextureCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var images: [Data: CGImage] = [:]
+
+    func image(for data: Data) -> CGImage? {
+        lock.lock(); defer { lock.unlock() }
+        return images[data]
+    }
+
+    func store(_ image: CGImage, for data: Data) {
+        lock.lock(); defer { lock.unlock() }
+        images[data] = image
     }
 }
 #endif

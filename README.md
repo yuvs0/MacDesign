@@ -53,10 +53,10 @@ A file opened and saved without changes is byte-identical, and any record you do
 is written back exactly as it was read. Layers, line types, widths, colours and solid
 fills are stored where 2D Design stores them (see `docs/FORMAT.md`).
 
-Hatch, gradient and pattern fills, arcs, curves, dimensions and arrows are read and drawn.
-MacDesign can't create the fills itself; choosing a fill colour replaces them. An edited
-dimension or arrow is saved as a group of the lines and text it shows. Pattern fills are
-drawn as a light cross-hatch, because the way their tile repeats isn't decoded yet.
+Hatch, gradient, texture and pattern fills, arcs, curves, dimensions and double lines are
+read and drawn. MacDesign can't create the fills itself; choosing a fill colour replaces
+them. An edited dimension or double line is saved as a group of the lines and text it
+shows.
 
 Shapes saved by MacDesign builds before October 2026 had their stroke colour written as
 a solid fill, and will open filled.

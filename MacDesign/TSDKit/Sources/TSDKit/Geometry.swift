@@ -106,6 +106,46 @@ public enum Geometry {
         return PathData(segments: segments, isClosed: sweep >= 360 - 1e-9)
     }
 
+    /// Closed outline of a polyline drawn `width` wide: both sides with mitred corners,
+    /// joined by square ends. nil for fewer than two distinct points.
+    public static func doubleLineOutline(_ points: [TSDPoint], width: Double) -> PathData? {
+        var pts: [TSDPoint] = []
+        for p in points where pts.last.map({ !near($0, p) }) ?? true { pts.append(p) }
+        guard pts.count >= 2 else { return nil }
+        let h = width / 2
+
+        func side(_ sign: Double) -> [TSDPoint] {
+            func normal(_ a: TSDPoint, _ b: TSDPoint) -> (Double, Double) {
+                let dx = b.x - a.x, dy = b.y - a.y
+                let l = max((dx * dx + dy * dy).squareRoot(), 1e-12)
+                return (-dy / l * sign, dx / l * sign)
+            }
+            var out: [TSDPoint] = []
+            for i in 0..<pts.count {
+                if i == 0 || i == pts.count - 1 {
+                    let n = i == 0 ? normal(pts[0], pts[1]) : normal(pts[i - 1], pts[i])
+                    out.append(TSDPoint(x: pts[i].x + n.0 * h, y: pts[i].y + n.1 * h))
+                    continue
+                }
+                let n1 = normal(pts[i - 1], pts[i]), n2 = normal(pts[i], pts[i + 1])
+                // Mitre: along the bisector, length h / cos(half the turn).
+                var mx = n1.0 + n2.0, my = n1.1 + n2.1
+                let ml = (mx * mx + my * my).squareRoot()
+                if ml < 1e-9 { mx = n1.0; my = n1.1 } else { mx /= ml; my /= ml }
+                let cosHalf = max(mx * n1.0 + my * n1.1, 0.1)
+                out.append(TSDPoint(x: pts[i].x + mx * h / cosHalf, y: pts[i].y + my * h / cosHalf))
+            }
+            return out
+        }
+
+        let left = side(1), right = side(-1)
+        var segments: [PathSegment] = [.move(left[0])]
+        for p in left.dropFirst() { segments.append(.line(p)) }
+        for p in right.reversed() { segments.append(.line(p)) }
+        segments.append(.line(left[0]))
+        return PathData(segments: segments, isClosed: true)
+    }
+
     // MARK: Recognising primitives in file paths
 
     /// Turns a path that is really an axis-aligned rectangle or an ellipse back into that primitive.

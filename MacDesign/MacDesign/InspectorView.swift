@@ -74,7 +74,7 @@ struct PropertiesPanel: View {
             }
             TextField("Font", text: $state.newTextFace)
             HStack {
-                Text("Text size")
+                Text("Text height")
                 Spacer()
                 TextField("", value: $state.newTextSize, format: .number)
                     .frame(width: 60)
@@ -188,7 +188,7 @@ struct PropertiesPanel: View {
                     ForEach(fontFamilies, id: \.self) { Text($0).tag($0) }
                 }
                 HStack {
-                    Text("Size")
+                    Text("Height")
                     Spacer()
                     TextField("", value: Binding(
                         get: { t.fontSize },

@@ -15,7 +15,7 @@ public enum Exporter {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             var copy = doc
-            copy.prefix = Data(); copy.middle = Data(); copy.trailer = Data()
+            copy.prefix = Data(); copy.middle = Data(); copy.trailer = Data(); copy.textures = []
             return try encoder.encode(copy)
         }
     }

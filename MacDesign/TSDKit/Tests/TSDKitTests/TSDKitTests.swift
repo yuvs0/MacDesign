@@ -41,7 +41,7 @@ final class TSDKitTests: XCTestCase {
         let texts = doc.objects.compactMap { o -> TextData? in if case .text(let t) = o.shape { return t } else { return nil } }
         XCTAssertEqual(texts.map { $0.string }, ["alex's clock", "fred is weird"])
         XCTAssertEqual(texts[0].fontFace, "Bauhaus 93")
-        XCTAssertEqual(texts[0].fontSize, 5, accuracy: 1e-9)
+        XCTAssertEqual(texts[0].fontSize, 4.467, accuracy: 1e-3)   // height of capitals
     }
 
     func testRoundTripIsByteIdentical() throws {
@@ -80,7 +80,8 @@ final class TSDKitTests: XCTestCase {
 
         // Row 1: line styles.
         let row1 = doc.objects[0..<7].map { $0.style }
-        XCTAssertEqual(row1.map { $0.lineType }, [.solid, .dashed, .dotted, .dashDot, .solid, .solid, .solid])
+        XCTAssertEqual(row1.map { $0.lineType }, [.solid, .dotted, .dashed, .longDash, .solid, .solid, .solid])
+        XCTAssertEqual(row1[1].dashScale, 1, accuracy: 1e-9)   // 1 mm wavelength
         XCTAssertEqual(row1[4].strokeWidth, 1, accuracy: 1e-9)
         XCTAssertEqual(row1[0].strokeWidth, 0)
         XCTAssertEqual(row1[5].strokeColor, .red)
@@ -93,12 +94,16 @@ final class TSDKitTests: XCTestCase {
         guard case .hatch(let hatch) = fills[2] else { return XCTFail("hatch") }
         XCTAssertEqual(hatch.color, .red)
         XCTAssertEqual(hatch.angle, 45, accuracy: 1e-9)
+        XCTAssertEqual(hatch.spacing, 0.5, accuracy: 1e-9)
         guard case .gradient(let gradient) = fills[3] else { return XCTFail("gradient") }
         XCTAssertEqual(gradient.stops.map { $0.color }, [.red, .white])
+        XCTAssertEqual(gradient.angle, 0, accuracy: 1e-9)   // left to right
         guard case .pattern(let chars) = fills[4], case .pattern(let tile) = fills[5] else { return XCTFail("patterns") }
-        XCTAssertEqual(chars.kind, 4)
-        XCTAssertEqual(tile.kind, 5)
+        XCTAssertEqual(chars.kind, FillPattern.texture)
+        XCTAssertEqual(doc.textures.count, 2)   // gold foil texture, then a smiley preview
+        XCTAssertEqual(tile.kind, FillPattern.drawing)
         XCTAssertEqual(tile.tile.count, 12)
+        XCTAssertEqual(tile.tileSize, TSDSize(width: 20, height: 20))
         guard case .hatch(let cross) = fills[6] else { return XCTFail("cross hatch") }
         XCTAssertTrue(cross.isCrossed)
 
@@ -106,15 +111,18 @@ final class TSDKitTests: XCTestCase {
         XCTAssertEqual(Set(doc.objects.map { $0.layer }), [1, 2])
         let texts = doc.objects.compactMap { o -> TextData? in if case .text(let t) = o.shape { return t } else { return nil } }
         XCTAssertEqual(texts.map { $0.string }, ["Layer 1", "Layer 2"])
+        XCTAssertEqual(texts[0].fontSize, 10, accuracy: 1e-9)
         XCTAssertEqual(doc.objects.first { if case .text(let t) = $0.shape { return t.string == "Layer 2" }; return false }?.layer, 2)
 
-        // Layer 2: native circle and arc, a dimension and an arrow.
+        // Layer 2: native circle and arc, a dimension and a 5 mm double line.
         let kinds = doc.objects.compactMap { $0.recordType }
         XCTAssertTrue(kinds.contains(Record.Kind.arc.rawValue))
         let dimension = try XCTUnwrap(doc.objects.first { $0.recordType == Record.Kind.dimension.rawValue })
         guard case .group(let parts) = dimension.shape else { return XCTFail("dimension parts") }
         XCTAssertTrue(parts.contains { if case .text(let t) = $0.shape { return t.string == "70" }; return false })
-        XCTAssertNotNil(doc.objects.first { $0.recordType == Record.Kind.arrow.rawValue })
+        let double = try XCTUnwrap(doc.objects.first { $0.recordType == Record.Kind.doubleLine.rawValue })
+        guard case .group(let outline) = double.shape, case .path(let p) = outline.first?.shape else { return XCTFail("double line") }
+        XCTAssertEqual(p.allPoints.first?.y ?? 0, 212.5, accuracy: 1e-9)   // 2.5 mm above the 210 centre line
         if case .arc(let c, let r, _, let a0, let a1) = try XCTUnwrap(doc.objects.first { $0.recordType == Record.Kind.arc.rawValue }).shape {
             XCTAssertEqual(c, TSDPoint(x: 45, y: 205)); XCTAssertEqual(r, 5, accuracy: 1e-9)
             XCTAssertEqual(a0, 180, accuracy: 1e-9); XCTAssertEqual(a1, 90, accuracy: 1e-9)
@@ -123,7 +131,7 @@ final class TSDKitTests: XCTestCase {
 
     func testEditedFeaturesStillSave() throws {
         var doc = try TSDReader.read(url: try fixture("features"))
-        // Move everything: dimensions and arrows become groups, arcs stay native.
+        // Move everything: dimensions and double lines become groups, arcs stay native.
         doc.objects = doc.objects.map { Geometry.transform($0, by: .translation(5, -3)) }
         doc.objects[0].style.lineType = .dashed
         doc.objects[0].style.strokeWidth = 0.5
