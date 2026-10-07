@@ -63,6 +63,9 @@ struct EditorToolbar: ToolbarContent {
     let fileURL: URL?
 
     var body: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            LockControls()
+        }
         ToolbarItemGroup(placement: .primaryAction) {
             Menu {
                 ForEach(ExportKind.allCases) { kind in
@@ -72,8 +75,6 @@ struct EditorToolbar: ToolbarContent {
                 Label("Export", systemImage: "square.and.arrow.up")
             }
             .help("Export the drawing for other software")
-
-            LockControls()
 
             ToolbarAlignMenu(state: state)
                 .help("Align or distribute the selected objects")
@@ -380,7 +381,8 @@ struct AlignMenuItems: View {
 }
 
 
-/// Joined pair in the toolbar: the lock mode (cycles grid, step, none) and object snapping.
+/// Joined pair at the left of the toolbar: the lock mode (cycles grid, step, none) and
+/// object snapping. One toolbar item, so they share a single glass capsule.
 struct LockControls: View {
     @AppStorage(GridPrefs.lockModeKey) private var lockMode = LockMode.grid.rawValue
     @AppStorage(GridPrefs.snapToObjectsKey) private var snapToObjects = true
@@ -388,19 +390,29 @@ struct LockControls: View {
     private var mode: LockMode { LockMode(rawValue: lockMode) ?? .grid }
 
     var body: some View {
-        ControlGroup {
+        HStack(spacing: 2) {
             Button {
                 withAnimation(.snappy) { lockMode = mode.next.rawValue }
             } label: {
-                Label(mode.title, systemImage: mode.systemImage)
+                Image(systemName: mode.systemImage)
                     .contentTransition(.symbolEffect(.replace.downUp))
+                    .frame(width: 26, height: 22)
             }
             .help("\(mode.title): click to change. Grid lock snaps to the grid, step lock to every millimetre.")
+            .accessibilityLabel(mode.title)
 
-            Toggle(isOn: $snapToObjects) {
-                Label("Snap", systemImage: "point.3.connected.trianglepath.dotted")
+            Button {
+                withAnimation(.snappy) { snapToObjects.toggle() }
+            } label: {
+                Image(systemName: "circle.and.line.horizontal")
+                    .frame(width: 26, height: 22)
+                    .foregroundStyle(snapToObjects ? Color.white : Color.primary)
+                    .background(snapToObjects ? Color.accentColor : Color.clear, in: .rect(cornerRadius: 6))
             }
             .help("Snap to the edges and centres of other objects and the page")
+            .accessibilityLabel("Snap to Objects")
+            .accessibilityAddTraits(snapToObjects ? .isSelected : [])
         }
+        .buttonStyle(.borderless)
     }
 }
