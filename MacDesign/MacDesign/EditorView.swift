@@ -114,7 +114,41 @@ struct EditorToolbar: ToolbarContent {
     let fileURL: URL?
 
     var body: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
+            Button {
+                state.undo()
+            } label: {
+                Label("Undo", systemImage: "arrow.uturn.backward")
+            }
+            .disabled(!state.canUndo)
+            .help("Undo")
+
+            Button {
+                state.redo()
+            } label: {
+                Label("Redo", systemImage: "arrow.uturn.forward")
+            }
+            .disabled(!state.canRedo)
+            .help("Redo")
+        }
+
         ToolbarItemGroup(placement: .primaryAction) {
+            #if os(iOS)
+            Menu {
+                Picker("Input", selection: $state.inputMode) {
+                    ForEach(InputMode.allCases) { mode in
+                        Label(mode.title, systemImage: mode.systemImage).tag(mode)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                Label(state.inputMode.title, systemImage: state.inputMode.systemImage)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .help("Whether fingers draw with the current tool or only select and move")
+            .onChange(of: state.inputMode) { _, mode in state.flash(mode.detail) }
+            #endif
+
             Menu {
                 ForEach(ExportKind.allCases) { kind in
                     Button("Export as \(kind.title)…") { ExportPanel.run(kind, document: document.doc, suggestedName: baseName) }

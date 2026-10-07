@@ -27,7 +27,7 @@ struct CanvasView: UIViewRepresentable {
 /// UIKit host for the canvas. UIKit's coordinates run top-down, so the drawing context is
 /// flipped and touch points are converted, and everything else works in the controller's
 /// y-up space. One finger or the Pencil draws and selects; two fingers pan; pinch zooms.
-final class DrawingCanvas: UIView, CanvasHost, UIGestureRecognizerDelegate, UIContextMenuInteractionDelegate {
+final class DrawingCanvas: UIView, CanvasHost, UIGestureRecognizerDelegate, UIContextMenuInteractionDelegate, UIPencilInteractionDelegate {
     let controller = CanvasController()
     /// The touch currently driving the tool, so a second finger (pan or pinch) doesn't interfere.
     private var activeTouch: UITouch?
@@ -50,6 +50,7 @@ final class DrawingCanvas: UIView, CanvasHost, UIGestureRecognizerDelegate, UICo
         let hover = UIHoverGestureRecognizer(target: self, action: #selector(hovered(_:)))
         addGestureRecognizer(hover)
         addInteraction(UIContextMenuInteraction(delegate: self))
+        addInteraction(UIPencilInteraction(delegate: self))
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -100,11 +101,17 @@ final class DrawingCanvas: UIView, CanvasHost, UIGestureRecognizerDelegate, UICo
         return m
     }
 
+    /// In Pencil mode a finger always selects and moves, whatever tool the Pencil is using.
+    private func toolOverride(for touch: UITouch) -> Tool? {
+        guard controller.state?.inputMode == .pencil, touch.type != .pencil else { return nil }
+        return .select
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         becomeFirstResponder()
         guard activeTouch == nil, let t = touches.first, event?.allTouches?.count ?? 1 == 1 else { return }
         activeTouch = t
-        controller.pointerDown(at: upPoint(t), modifiers: mods(event), clickCount: t.tapCount)
+        controller.pointerDown(at: upPoint(t), modifiers: mods(event), clickCount: t.tapCount, using: toolOverride(for: t))
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -167,6 +174,15 @@ final class DrawingCanvas: UIView, CanvasHost, UIGestureRecognizerDelegate, UICo
             }
             return UIMenu(children: groups.map { UIMenu(options: .displayInline, children: $0) })
         }
+    }
+
+    // MARK: Apple Pencil double tap
+
+    /// Double tap switches between the Delete tool and the tool in use before it, the way
+    /// other apps swap pen and eraser. Honours the Pencil setting that turns the tap off.
+    func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+        guard UIPencilInteraction.preferredTapAction != .ignore else { return }
+        controller.state?.toggleEraser()
     }
 
     // MARK: Hardware keyboard

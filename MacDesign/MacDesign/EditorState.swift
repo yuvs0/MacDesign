@@ -8,7 +8,7 @@ struct FilletPreview: Equatable {
 }
 
 enum Tool: String, CaseIterable, Identifiable {
-    case select, directSelect, rectangle, ellipse, line, arc, pen, text
+    case select, directSelect, rectangle, ellipse, line, arc, pen, text, eraser
 
     var id: String { rawValue }
 
@@ -22,6 +22,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .arc: return "Arc"
         case .pen: return "Pen"
         case .text: return "Text"
+        case .eraser: return "Delete"
         }
     }
 
@@ -35,6 +36,7 @@ enum Tool: String, CaseIterable, Identifiable {
         case .arc: return "arrow.counterclockwise"
         case .pen: return "pencil.and.outline"
         case .text: return "textformat"
+        case .eraser: return "eraser"
         }
     }
 
@@ -48,10 +50,40 @@ enum Tool: String, CaseIterable, Identifiable {
         case .arc: return "c"
         case .pen: return "p"
         case .text: return "t"
+        case .eraser: return "x"
         }
     }
 
     var help: String { "\(title) (\(shortcut.uppercased()))" }
+}
+
+/// How touches on the iPad canvas are read. In pencil mode the Pencil uses the current tool
+/// and fingers always select and move, so a hand resting on the glass can't draw.
+enum InputMode: String, CaseIterable, Identifiable {
+    case touch, pencil
+    var id: String { rawValue }
+    static let key = "inputMode"
+
+    var title: String {
+        switch self {
+        case .touch: return "Touch"
+        case .pencil: return "Apple Pencil"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .touch: return "Fingers and Pencil both use the current tool"
+        case .pencil: return "Pencil uses the current tool; fingers select and move"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .touch: return "hand.tap"
+        case .pencil: return "applepencil.and.scribble"
+        }
+    }
 }
 
 enum InspectorTab: String, CaseIterable, Identifiable {
@@ -65,9 +97,21 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 @MainActor
 final class EditorState: ObservableObject {
     let document: DesignDocument
-    weak var undoManager: UndoManager?
+    weak var undoManager: UndoManager? {
+        didSet { if oldValue !== undoManager { observeUndoManager() } }
+    }
+    /// Mirror the undo manager's state so the toolbar buttons enable and disable.
+    @Published private(set) var canUndo = false
+    @Published private(set) var canRedo = false
+    private var undoObservers: [NSObjectProtocol] = []
 
     @Published var tool: Tool = .select
+    /// The tool in use before the Delete tool was switched on, for switching back.
+    private var toolBeforeEraser: Tool = .select
+    /// iPad only: whether fingers share the current tool with the Pencil or always select.
+    @Published var inputMode: InputMode = InputMode(rawValue: UserDefaults.standard.string(forKey: InputMode.key) ?? "") ?? .touch {
+        didSet { UserDefaults.standard.set(inputMode.rawValue, forKey: InputMode.key) }
+    }
     @Published var selection: Set<UUID> = []
     /// Screen points per millimetre.
     @Published var zoom: CGFloat = 2
@@ -95,6 +139,44 @@ final class EditorState: ObservableObject {
     }
 
     var doc: TSDDocument { document.doc }
+
+    // MARK: Undo
+
+    func undo() { undoManager?.undo() }
+    func redo() { undoManager?.redo() }
+
+    private func observeUndoManager() {
+        undoObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        undoObservers = []
+        refreshUndoState()
+        guard let um = undoManager else { return }
+        let names: [Notification.Name] = [.NSUndoManagerCheckpoint, .NSUndoManagerDidUndoChange, .NSUndoManagerDidRedoChange, .NSUndoManagerDidCloseUndoGroup]
+        for name in names {
+            undoObservers.append(NotificationCenter.default.addObserver(forName: name, object: um, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshUndoState() }
+            })
+        }
+    }
+
+    private func refreshUndoState() {
+        let u = undoManager?.canUndo ?? false, r = undoManager?.canRedo ?? false
+        if u != canUndo { canUndo = u }
+        if r != canRedo { canRedo = r }
+    }
+
+    // MARK: Delete tool
+
+    /// Swaps between the Delete tool and whatever was in use before it (Pencil double tap).
+    func toggleEraser() {
+        if tool == .eraser {
+            tool = toolBeforeEraser
+            flash("\(tool.title) tool")
+        } else {
+            toolBeforeEraser = tool
+            tool = .eraser
+            flash("Delete tool: tap an object to remove it")
+        }
+    }
 
     // MARK: Mutations
 

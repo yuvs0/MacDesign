@@ -77,6 +77,7 @@ final class DrawingCanvas: NSView, CanvasHost {
         switch s.tool {
         case .select, .directSelect: addCursorRect(bounds, cursor: .arrow)
         case .text: addCursorRect(bounds, cursor: .iBeam)
+        case .eraser: addCursorRect(bounds, cursor: .disappearingItem)
         default: addCursorRect(bounds, cursor: .crosshair)
         }
     }

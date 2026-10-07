@@ -54,6 +54,8 @@ final class CanvasController {
         case penDrag(anchor: TSDPoint, current: TSDPoint)
         /// Direct selection: moving an anchor or handle of the selected path.
         case editPoint(objectID: UUID, part: PathEditing.Part, path: PathData, original: TSDKit.Shape, moved: Bool)
+        /// Delete tool: everything swept over goes, as one undo step.
+        case erase
     }
 
     private var drag: Drag = .none
@@ -62,6 +64,9 @@ final class CanvasController {
     private var pointerLocation: TSDPoint?
     /// Modifiers of the most recent pointer event, for the resize constraint.
     private var modifiers: InputModifiers = []
+    /// The tool driving the current press. Usually the editor's tool, but a host can ask
+    /// for another one for a single press (iPad: fingers select while the Pencil draws).
+    private var activeTool: Tool = .select
 
     // Snapping during a drag.
     private var snapper: Snapper?
@@ -247,7 +252,7 @@ final class CanvasController {
         let lw = 1.0 / Double(s.zoom)
         ctx.setLineWidth(lw)
         ctx.setStrokeColor(Platform.accentColor)
-        if case .create(let start, let current, let shift) = drag, let shape = creationShape(tool: s.tool, start: start, end: current, shift: shift),
+        if case .create(let start, let current, let shift) = drag, let shape = creationShape(tool: activeTool, start: start, end: current, shift: shift),
            let p = Renderer.cgPath(for: shape) {
             ctx.addPath(p)
             ctx.strokePath()
@@ -533,14 +538,16 @@ final class CanvasController {
 
     // MARK: Pointer input (view coordinates, y up)
 
-    func pointerDown(at vp: CGPoint, modifiers mods: InputModifiers, clickCount: Int) {
+    /// `tool` overrides the editor's tool for this press and the drag that follows it.
+    func pointerDown(at vp: CGPoint, modifiers mods: InputModifiers, clickCount: Int, using tool: Tool? = nil) {
         guard let s = state else { return }
         modifiers = mods
         var p = s.toDocument(vp)
         let shift = mods.contains(.shift)
         let isDouble = clickCount >= 2
+        activeTool = tool ?? s.tool
 
-        switch s.tool {
+        switch activeTool {
         case .directSelect:
             directPointerDown(viewPoint: vp, docPoint: p, state: s)
         case .select:
@@ -599,8 +606,22 @@ final class CanvasController {
                 s.focusTextRequest += 1
                 host?.toolChanged()
             }
+        case .eraser:
+            drag = .erase
+            erase(at: p)
         }
         host?.canvasNeedsDisplay()
+    }
+
+    /// Open while a Delete-tool sweep has removed something, so the whole sweep undoes at once.
+    private var eraseGroupOpen = false
+
+    /// Deletes the topmost editable object under the point, if any.
+    private func erase(at p: TSDPoint) {
+        guard let s = state, let hit = hitTest(p) else { return }
+        if !eraseGroupOpen { s.undoManager?.beginUndoGrouping(); eraseGroupOpen = true }
+        s.selection = []
+        s.mutate("Delete") { $0.remove(ids: [hit.id]) }
     }
 
     func pointerDragged(to vp: CGPoint, modifiers mods: InputModifiers) {
@@ -634,6 +655,7 @@ final class CanvasController {
             if let o = s.doc.objects.first(where: { $0.id == id }), let base = PathEditing.editablePath(o.shape) {
                 dragEditPoint(objectID: id, part: part, path: base, original: original, to: p)
             }
+        case .erase: erase(at: p)
         case .none: break
         }
         host?.canvasNeedsDisplay()
@@ -650,7 +672,7 @@ final class CanvasController {
         default: break
         }
         switch drag {
-        case .marquee(let start, _) where s.tool == .directSelect:
+        case .marquee(let start, _) where activeTool == .directSelect:
             let r = TSDRect(p1: start, p2: p)
             if r.width * Double(s.zoom) > 3 || r.height * Double(s.zoom) > 3 {
                 // Prefer anchors of an already selected path; otherwise select the objects inside.
@@ -681,7 +703,7 @@ final class CanvasController {
         case .scale(let h, let b, _):
             s.transformSelection(scaleTransform(handle: h, bounds: b, to: p), actionName: "Resize")
         case .create(let start, _, let shift):
-            if let shape = creationShape(tool: s.tool, start: start, end: p, shift: shift || mods.contains(.shift)),
+            if let shape = creationShape(tool: activeTool, start: start, end: p, shift: shift || mods.contains(.shift)),
                start.distance(to: p) * Double(s.zoom) > 3 {
                 var style = s.newShapeStyle
                 if case .line = shape { style.fillColor = nil }
@@ -711,6 +733,8 @@ final class CanvasController {
                 penSegments.append(.line(anchor))
             }
             penOutHandle = dragged ? current : nil
+        case .erase:
+            if eraseGroupOpen { s.undoManager?.endUndoGrouping(); eraseGroupOpen = false }
         case .none:
             break
         }
