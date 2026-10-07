@@ -15,8 +15,10 @@ struct MacDesignApp: App {
         .commands {
             EditorCommands()
         }
+        #if os(macOS)
         Settings {
             SettingsView()
         }
+        #endif
     }
 }

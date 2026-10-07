@@ -1,6 +1,5 @@
 import SwiftUI
 import Combine
-import AppKit
 import TSDKit
 
 struct FilletPreview: Equatable {
@@ -433,6 +432,8 @@ final class EditorState: ObservableObject {
     @Published var explodeRequest = false
     /// Set to show the Fillet sheet.
     @Published var filletRequest = false
+    /// Set to show Settings as a sheet (iPad; the Mac has a Settings window).
+    @Published var settingsRequest = false
     /// While the Fillet sheet is open: what it would do, drawn on the canvas in place of the selection.
     @Published var filletPreview: FilletPreview?
 
@@ -480,7 +481,7 @@ final class EditorState: ObservableObject {
     func requestFillet() {
         let objs = selectedObjects.filter { isEditable($0) }
         guard !objs.isEmpty, objs.allSatisfy({ PathEditing.editablePath($0.shape) != nil || { if case .group = $0.shape { return true } else { return false } }($0) }) else {
-            NSSound.beep(); flash("Select two touching lines or paths, or a path with corners."); return
+            Platform.beep(); flash("Select two touching lines or paths, or a path with corners."); return
         }
         filletRequest = true
     }
@@ -492,9 +493,9 @@ final class EditorState: ObservableObject {
         guard !objs.isEmpty else { return }
         if objs.count >= 2 {
             guard let (joined, result) = Fillet.joinAndFillet(objs, radius: radius, style: style) else {
-                NSSound.beep(); flash("The objects don't touch end to end, so they can't be joined."); return
+                Platform.beep(); flash("The objects don't touch end to end, so they can't be joined."); return
             }
-            guard result.count > 0 else { NSSound.beep(); flash(result.reason ?? "Nothing to fillet."); return }
+            guard result.count > 0 else { Platform.beep(); flash(result.reason ?? "Nothing to fillet."); return }
             let ids = Set(objs.map { $0.id })
             var newID = UUID()
             mutate("Fillet") { doc in
@@ -509,11 +510,11 @@ final class EditorState: ObservableObject {
             return
         }
         let o = objs[0]
-        guard let path = PathEditing.editablePath(o.shape) else { NSSound.beep(); flash("This object has no corners to round."); return }
+        guard let path = PathEditing.editablePath(o.shape) else { Platform.beep(); flash("This object has no corners to round."); return }
         // Ring node k is path anchor k, except that a closed path's repeated end is dropped.
         let corners: Set<Int>? = selectedAnchors.isEmpty ? nil : Set(selectedAnchors.map { min($0, path.segments.count - 1) })
         let result = Fillet.apply(to: path, corners: corners, radius: radius, style: style)
-        guard result.count > 0 else { NSSound.beep(); flash(result.reason ?? "Nothing to fillet."); return }
+        guard result.count > 0 else { Platform.beep(); flash(result.reason ?? "Nothing to fillet."); return }
         let id = o.id
         mutate("Fillet") { doc in
             if let i = doc.objects.firstIndex(where: { $0.id == id }) {
@@ -527,7 +528,7 @@ final class EditorState: ObservableObject {
     }
 
     func requestExplode() {
-        guard selectedObjects.contains(where: { isEditable($0) && !PathOps.isPrimitive($0) }) else { NSSound.beep(); return }
+        guard selectedObjects.contains(where: { isEditable($0) && !PathOps.isPrimitive($0) }) else { Platform.beep(); return }
         explodeRequest = true
     }
 
@@ -666,19 +667,5 @@ final class EditorState: ObservableObject {
 
     func toDocument(_ p: CGPoint) -> TSDPoint {
         TSDPoint(x: Double((p.x - origin.x) / zoom), y: Double((p.y - origin.y) / zoom))
-    }
-}
-
-// MARK: - Colour bridging
-
-extension RGB {
-    var color: Color { Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255) }
-    var nsColor: NSColor { NSColor(srgbRed: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: 1) }
-
-    init?(_ color: Color) {
-        guard let ns = NSColor(color).usingColorSpace(.sRGB) else { return nil }
-        self.init(r: UInt8(max(0, min(255, (ns.redComponent * 255).rounded()))),
-                  g: UInt8(max(0, min(255, (ns.greenComponent * 255).rounded()))),
-                  b: UInt8(max(0, min(255, (ns.blueComponent * 255).rounded()))))
     }
 }

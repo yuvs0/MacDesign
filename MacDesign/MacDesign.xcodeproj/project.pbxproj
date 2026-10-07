@@ -12,9 +12,9 @@
 		54131E563076A4BF008DD938 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 54131E533076A4BF008DD938 /* AppIcon.icon */; };
 		AA0000000000000000000001 /* TSDKit in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000002 /* TSDKit */; };
 		BB00000000000000000007 /* TSDKit in Frameworks */ = {isa = PBXBuildFile; productRef = BB00000000000000000008 /* TSDKit */; };
-		BB00000000000000000012 /* QuickLookThumbnail.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BB00000000000000000002 /* QuickLookThumbnail.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BB00000000000000000012 /* QuickLookThumbnail.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BB00000000000000000002 /* QuickLookThumbnail.appex */; platformFilters = (macos, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		CC00000000000000000007 /* TSDKit in Frameworks */ = {isa = PBXBuildFile; productRef = CC00000000000000000008 /* TSDKit */; };
-		CC00000000000000000012 /* QuickLookPreview.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CC00000000000000000002 /* QuickLookPreview.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		CC00000000000000000012 /* QuickLookPreview.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CC00000000000000000002 /* QuickLookPreview.appex */; platformFilters = (macos, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -267,11 +267,17 @@
 /* Begin PBXTargetDependency section */
 		BB00000000000000000013 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilters = (
+				macos,
+			);
 			target = BB00000000000000000001 /* QuickLookThumbnail */;
 			targetProxy = BB00000000000000000014 /* PBXContainerItemProxy */;
 		};
 		CC00000000000000000013 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilters = (
+				macos,
+			);
 			target = CC00000000000000000001 /* QuickLookPreview */;
 			targetProxy = CC00000000000000000014 /* PBXContainerItemProxy */;
 		};
@@ -332,7 +338,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
@@ -396,7 +402,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
@@ -430,9 +436,14 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.imaginaryparts.macdesign;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
-				SDKROOT = macosx;
+				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 2;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=iphone*]" = "@executable_path/Frameworks";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -461,9 +472,14 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.imaginaryparts.macdesign;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
-				SDKROOT = macosx;
+				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = 2;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=iphone*]" = "@executable_path/Frameworks";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;

@@ -47,7 +47,7 @@ struct OptionCard<Content: View>: View {
             VStack(spacing: 8) {
                 content()
                     .frame(width: 200, height: 120)
-                    .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 8))
+                    .background(Platform.cardBackground, in: .rect(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.15), lineWidth: selected ? 3 : 1))
                 Text(title).font(.body.weight(.semibold))
                 Text(caption).font(.caption).foregroundStyle(.secondary)

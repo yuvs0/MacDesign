@@ -1,5 +1,8 @@
-import AppKit
+import Foundation
 import TSDKit
+#if os(macOS)
+import AppKit
+#endif
 
 /// Grid and snapping preferences, shared by all windows and kept in user defaults.
 /// The View menu edits them through @AppStorage with the same keys.
@@ -75,6 +78,7 @@ enum GridPrefs {
     /// Asks for a custom grid spacing.
     @MainActor
     static func askForCustomSpacing() {
+        #if os(macOS)
         let alert = NSAlert()
         alert.messageText = "Grid Spacing"
         alert.informativeText = "Distance between grid lines, in millimetres."
@@ -89,8 +93,9 @@ enum GridPrefs {
         if let v = Double(text), v >= 0.1, v <= 500 {
             UserDefaults.standard.set(v, forKey: gridSpacingKey)
         } else {
-            NSSound.beep()
+            Platform.beep()
         }
+        #endif
     }
 }
 
@@ -232,7 +237,7 @@ struct SnapHaptics {
         guard !key.isEmpty, key != lastKey, GridPrefs.haptics else { return }
         // Only when something new engages, not when a snap is released.
         if !Set(key).isSubset(of: Set(lastKey)) {
-            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            Platform.snapHaptic()
         }
     }
 

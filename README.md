@@ -1,8 +1,16 @@
 # MacDesign
 
 A cut-down Illustrator-style editor for TechSoft 2D Design V3 files (`.3vs`, `.tsd`) on
-macOS. It opens the files directly, lets you draw and edit, saves back to `.3vs`, and
+macOS and iPadOS. It opens the files directly, lets you draw and edit, saves back to `.3vs`, and
 exports SVG, DXF, PDF and PNG for laser cutters and other software.
+
+## iPad
+
+The same target builds for iPadOS 26. The document browser opens `.3vs` files from
+Files or iCloud; one finger or the Pencil draws and selects, two fingers pan, pinch zooms,
+long-press for the context menu, and a hardware keyboard gets the same tool keys and
+arrow nudges as the Mac. Settings sit behind the gear in the toolbar; Export goes through
+the share sheet. Quick Look extensions are Mac only.
 
 ## Layout
 

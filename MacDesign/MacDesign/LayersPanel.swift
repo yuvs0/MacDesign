@@ -88,7 +88,9 @@ private struct LayerHeader: View {
                     editingName = false
                 })
                 .textFieldStyle(.roundedBorder)
+                #if os(macOS)
                 .onExitCommand { editingName = false }
+                #endif
             } else {
                 Text(layer.name)
                     .fontWeight(state.activeLayer == layer.index ? .semibold : .regular)

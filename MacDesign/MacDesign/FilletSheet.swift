@@ -126,7 +126,11 @@ struct SettingsView: View {
                     Text("Arc, tangent to both sides (G1)").tag(false)
                     Text("Smooth, curvature eases in (like Apple's shapes)").tag(true)
                 }
+                #if os(macOS)
                 .pickerStyle(.radioGroup)
+                #else
+                .pickerStyle(.inline)
+                #endif
                 if smooth {
                     HStack {
                         Text("Smoothing")
@@ -150,7 +154,9 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        #if os(macOS)
         .frame(width: 420)
+        #endif
     }
 }
 

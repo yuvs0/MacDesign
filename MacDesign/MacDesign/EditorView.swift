@@ -1,7 +1,12 @@
 import SwiftUI
 import Combine
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import UniformTypeIdentifiers
+import ImageIO
 import TSDKit
 
 struct EditorView: View {
@@ -14,6 +19,26 @@ struct EditorView: View {
         self.document = document
         self.fileURL = fileURL
         _state = StateObject(wrappedValue: EditorState(document: document))
+    }
+
+    /// One sheet at a time: several .sheet modifiers on one view don't present reliably on iPadOS.
+    private enum ActiveSheet: String, Identifiable {
+        case explode, fillet, settings
+        var id: String { rawValue }
+    }
+
+    private var activeSheet: Binding<ActiveSheet?> {
+        Binding(
+            get: {
+                if state.settingsRequest { return .settings }
+                if state.filletRequest { return .fillet }
+                if state.explodeRequest { return .explode }
+                return nil
+            },
+            set: { v in
+                if v == nil { state.settingsRequest = false; state.filletRequest = false; state.explodeRequest = false }
+            }
+        )
     }
 
     var body: some View {
@@ -59,11 +84,25 @@ struct EditorView: View {
                 .inspectorColumnWidth(min: 240, ideal: 280, max: 360)
         }
         .toolbar { EditorToolbar(state: state, document: document, fileURL: fileURL) }
-        .sheet(isPresented: $state.explodeRequest) { ExplodeSheet(state: state) }
-        .sheet(isPresented: $state.filletRequest) { FilletSheet(state: state) }
+        .sheet(item: activeSheet) { sheet in
+            switch sheet {
+            case .explode: ExplodeSheet(state: state)
+            case .fillet: FilletSheet(state: state)
+            case .settings:
+                NavigationStack {
+                    SettingsView()
+                        .navigationTitle("Settings")
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) { Button("Done") { state.settingsRequest = false } }
+                        }
+                }
+            }
+        }
         .focusedSceneValue(\.editorState, state)
         .onAppear { state.undoManager = undoManager }
+        #if os(macOS)
         .frame(minWidth: 900, minHeight: 560)
+        #endif
     }
 }
 
@@ -87,6 +126,15 @@ struct EditorToolbar: ToolbarContent {
 
             ToolbarAlignMenu(state: state)
                 .help("Align or distribute the selected objects")
+
+            #if os(iOS)
+            Button {
+                state.settingsRequest = true
+            } label: {
+                Label("Settings", systemImage: "gear")
+            }
+            .help("Fillet style and other settings")
+            #endif
 
             Button {
                 state.showInspector.toggle()
@@ -119,8 +167,26 @@ enum ExportKind: String, CaseIterable, Identifiable {
 }
 
 enum ExportPanel {
+    static func data(for kind: ExportKind, document: TSDDocument) throws -> Data {
+        switch kind {
+        case .svg: return try Exporter.data(for: document, format: .svg)
+        case .dxf: return try Exporter.data(for: document, format: .dxf)
+        case .pdf: return Renderer.pdfData(for: document)
+        case .png:
+            guard let image = Renderer.image(for: document, dotsPerMM: 8) else { throw TSDError.cannotWrite("Could not render the page.") }
+            let out = NSMutableData()
+            guard let dest = CGImageDestinationCreateWithData(out as CFMutableData, UTType.png.identifier as CFString, 1, nil) else {
+                throw TSDError.cannotWrite("PNG encoding failed.")
+            }
+            CGImageDestinationAddImage(dest, image, nil)
+            guard CGImageDestinationFinalize(dest) else { throw TSDError.cannotWrite("PNG encoding failed.") }
+            return out as Data
+        }
+    }
+
     @MainActor
     static func run(_ kind: ExportKind, document: TSDDocument, suggestedName: String) {
+        #if os(macOS)
         let panel = NSSavePanel()
         panel.title = "Export as \(kind.title)"
         panel.nameFieldStringValue = "\(suggestedName).\(kind.rawValue)"
@@ -128,22 +194,27 @@ enum ExportPanel {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            let data: Data
-            switch kind {
-            case .svg: data = try Exporter.data(for: document, format: .svg)
-            case .dxf: data = try Exporter.data(for: document, format: .dxf)
-            case .pdf: data = Renderer.pdfData(for: document)
-            case .png:
-                guard let image = Renderer.image(for: document, dotsPerMM: 8) else { throw TSDError.cannotWrite("Could not render the page.") }
-                let rep = NSBitmapImageRep(cgImage: image)
-                guard let png = rep.representation(using: .png, properties: [:]) else { throw TSDError.cannotWrite("PNG encoding failed.") }
-                data = png
-            }
-            try data.write(to: url)
+            try data(for: kind, document: document).write(to: url)
         } catch {
-            let alert = NSAlert(error: error)
-            alert.runModal()
+            NSAlert(error: error).runModal()
         }
+        #else
+        // On iPad the file goes to a temporary location and the share sheet takes it from there.
+        do {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(suggestedName).\(kind.rawValue)")
+            try data(for: kind, document: document).write(to: url)
+            let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }),
+                  let root = scene.keyWindow?.rootViewController else { return }
+            var top = root
+            while let presented = top.presentedViewController { top = presented }
+            share.popoverPresentationController?.sourceView = top.view
+            share.popoverPresentationController?.sourceRect = CGRect(x: top.view.bounds.midX, y: 60, width: 1, height: 1)
+            top.present(share, animated: true)
+        } catch {
+            print("Export failed: \(error)")
+        }
+        #endif
     }
 }
 
@@ -242,6 +313,7 @@ struct EditorCommands: Commands {
     @FocusedValue(\.editorState) private var state
 
     var body: some Commands {
+        #if os(macOS)
         // Hide loses ⌘H so Make Path can have it, as in 2D Design.
         CommandGroup(replacing: .appVisibility) {
             Button("Hide MacDesign") { NSApp.hide(nil) }
@@ -250,6 +322,7 @@ struct EditorCommands: Commands {
                 .keyboardShortcut("h", modifiers: [.command, .option])
             Button("Show All") { NSApp.unhideAllApplications(nil) }
         }
+        #endif
         // The Find and Spelling submenus claim ⌘E, ⌘G and ⌘J; a drawing app doesn't need them.
         CommandGroup(replacing: .textEditing) {}
         CommandGroup(after: .pasteboard) {
@@ -361,8 +434,10 @@ struct ViewMenuItems: View {
             if !GridPrefs.spacingPresets.contains(where: { abs($0 - gridSpacing) < 1e-9 }) {
                 Toggle(GridPrefs.spacingLabel(gridSpacing), isOn: .constant(true))
             }
+            #if os(macOS)
             Divider()
             Button("Other…") { GridPrefs.askForCustomSpacing() }
+            #endif
         }
         Menu("Major Lines") {
             ForEach(GridPrefs.majorPresets, id: \.self) { n in

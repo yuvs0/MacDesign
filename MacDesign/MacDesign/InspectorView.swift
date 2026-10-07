@@ -1,6 +1,5 @@
 import SwiftUI
 import Combine
-import AppKit
 import TSDKit
 
 struct InspectorView: View {
@@ -275,7 +274,7 @@ struct PropertiesPanel: View {
     }
 
     private var fontFamilies: [String] {
-        NSFontManager.shared.availableFontFamilies.sorted()
+        Platform.fontFamilies
     }
 
     // Rows
