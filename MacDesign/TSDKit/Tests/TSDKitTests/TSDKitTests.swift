@@ -265,3 +265,56 @@ extension PathOpsTests {
         XCTAssertEqual(PathOps.explode(circle).count, 1)
     }
 }
+
+final class FilletTests: XCTestCase {
+    func corner() -> PathData {
+        PathData(segments: [.move(TSDPoint(x: 0, y: 0)), .line(TSDPoint(x: 10, y: 0)), .line(TSDPoint(x: 10, y: 10))], isClosed: false)
+    }
+
+    func testArcFilletOnRightAngle() {
+        let r = Fillet.apply(to: corner(), corners: nil, radius: 2, style: .arc)
+        XCTAssertEqual(r.count, 1)
+        XCTAssertEqual(r.path.segments.count, 4)   // move, line, curve, line
+        XCTAssertEqual(r.path.segments[1].endPoint.x, 8, accuracy: 1e-6)
+        XCTAssertEqual(r.path.segments[2].endPoint, TSDPoint(x: 10, y: 2))
+        // The arc passes through the point on the circle at 45°.
+        if case .curve = r.path.segments[2] {} else { XCTFail("fillet should be a curve") }
+    }
+
+    func testSmoothFilletEasesIn() {
+        let r = Fillet.apply(to: corner(), corners: nil, radius: 2, style: .smooth(0.6))
+        XCTAssertEqual(r.count, 1)
+        XCTAssertEqual(r.path.segments.count, 6)   // move, line, ease, arc, ease, line
+        XCTAssertEqual(r.path.segments[1].endPoint.x, 10 - 3.2, accuracy: 1e-6)   // (1 + 0.6) * 2
+        XCTAssertEqual(r.path.segments.last?.endPoint, TSDPoint(x: 10, y: 10))
+    }
+
+    func testCollinearIsRefused() {
+        let straight = PathData(segments: [.move(.zero), .line(TSDPoint(x: 5, y: 0)), .line(TSDPoint(x: 10, y: 0))], isClosed: false)
+        let r = Fillet.apply(to: straight, corners: nil, radius: 2, style: .arc)
+        XCTAssertEqual(r.count, 0)
+        XCTAssertNotNil(r.reason)
+        XCTAssertEqual(r.path, straight)
+    }
+
+    func testTwoLinesJoinAndFillet() {
+        let a = DesignObject(shape: .line(TSDPoint(x: 0, y: 0), TSDPoint(x: 10, y: 0)))
+        let b = DesignObject(shape: .line(TSDPoint(x: 10, y: 10), TSDPoint(x: 10, y: 0)))   // drawn towards the corner
+        let (o, r) = Fillet.joinAndFillet([a, b], radius: 3, style: .arc)!
+        XCTAssertEqual(r.count, 1)
+        if case .path(let p) = o.shape { XCTAssertEqual(p.segments.count, 4) } else { XCTFail("path") }
+        // Lines that don't touch can't be joined.
+        let far = DesignObject(shape: .line(TSDPoint(x: 50, y: 50), TSDPoint(x: 60, y: 50)))
+        XCTAssertNil(Fillet.joinAndFillet([a, far], radius: 3, style: .arc))
+    }
+
+    func testClosedRectangleAllCorners() {
+        let rect = Geometry.path(for: .rect(TSDRect(minX: 0, minY: 0, maxX: 20, maxY: 10)))!
+        let r = Fillet.apply(to: rect, corners: nil, radius: 2, style: .arc)
+        XCTAssertEqual(r.count, 4)
+        XCTAssertTrue(r.path.isClosed)
+        // Radius capped by the short side when asked for too much.
+        let big = Fillet.apply(to: rect, corners: nil, radius: 50, style: .arc)
+        XCTAssertEqual(big.count, 4)
+    }
+}

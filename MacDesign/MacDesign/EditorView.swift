@@ -54,6 +54,7 @@ struct EditorView: View {
         }
         .toolbar { EditorToolbar(state: state, document: document, fileURL: fileURL) }
         .sheet(isPresented: $state.explodeRequest) { ExplodeSheet(state: state) }
+        .sheet(isPresented: $state.filletRequest) { FilletSheet(state: state) }
         .focusedSceneValue(\.editorState, state)
         .onAppear { state.undoManager = undoManager }
         .frame(minWidth: 900, minHeight: 560)
@@ -278,6 +279,9 @@ struct ObjectMenuItems: View {
             .disabled(state.selection.isEmpty)
         Button("Explode…") { state.requestExplode() }
             .keyboardShortcut("e", modifiers: .command)
+            .disabled(state.selection.isEmpty)
+        Button("Fillet Corners…") { state.requestFillet() }
+            .keyboardShortcut("r", modifiers: .command)
             .disabled(state.selection.isEmpty)
         Divider()
         Button("Bring to Front") { state.arrange(.front) }

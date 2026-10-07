@@ -760,6 +760,7 @@ final class DrawingCanvas: NSView {
         item("Ungroup", #selector(menuUngroup), enabled: s.selectedObjects.contains { if case .group = $0.shape { return true } else { return false } })
         item("Make Path", #selector(menuMakePath), enabled: has)
         item("Explode…", #selector(menuExplode), enabled: has)
+        item("Fillet Corners…", #selector(menuFillet), enabled: has)
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
 
@@ -771,6 +772,7 @@ final class DrawingCanvas: NSView {
     @objc private func menuUngroup() { state?.ungroupSelection() }
     @objc private func menuMakePath() { state?.makePath() }
     @objc private func menuExplode() { state?.requestExplode() }
+    @objc private func menuFillet() { state?.requestFillet() }
 
     // MARK: Shape creation
 

@@ -3,7 +3,10 @@ import TSDKit
 
 @main
 struct MacDesignApp: App {
-    init() { GridPrefs.register() }
+    init() {
+        GridPrefs.register()
+        FilletPrefs.register()
+    }
 
     var body: some Scene {
         DocumentGroup(newDocument: { DesignDocument() }) { config in
@@ -11,6 +14,9 @@ struct MacDesignApp: App {
         }
         .commands {
             EditorCommands()
+        }
+        Settings {
+            SettingsView()
         }
     }
 }
