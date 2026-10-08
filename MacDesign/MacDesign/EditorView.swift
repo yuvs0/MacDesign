@@ -133,16 +133,12 @@ struct EditorToolbar: ToolbarContent {
     }
 
     var body: some ToolbarContent {
-        #if os(macOS)
-        ToolbarItemGroup(placement: .navigation) { undoRedo }
-        #endif
-
         ToolbarItemGroup(placement: .primaryAction) {
-            #if os(iOS)
-            // On iPadOS 26 items at the leading edge next to the document title vanish after a
-            // few edits (the system rebuilds that side of the bar), so Undo and Redo sit here.
+            // First in the trailing group on both platforms. At the leading edge on iPadOS 26
+            // they vanished after a few edits, when the system rebuilt that side of the bar.
             undoRedo
             Spacer()
+            #if os(iOS)
             Menu {
                 Picker("Input", selection: $state.inputMode) {
                     ForEach(InputMode.allCases) { mode in
@@ -385,10 +381,17 @@ struct EditMenuItems: View {
     @ObservedObject var state: EditorState
 
     var body: some View {
+        // On iPad the canvas handles ⌘A and ⇧⌘A itself (CanvasView_iOS): a menu shortcut on ⌘A
+        // duplicates the text field's own Select All and UIKit throws as soon as one gets focus.
+        #if os(macOS)
         Button("Select All") { state.selectAll() }
             .keyboardShortcut("a", modifiers: .command)
         Button("Deselect All") { state.deselectAll() }
             .keyboardShortcut("a", modifiers: [.command, .shift])
+        #else
+        Button("Select All") { state.selectAll() }
+        Button("Deselect All") { state.deselectAll() }
+        #endif
         Button("Duplicate") { state.duplicateSelection() }
             .keyboardShortcut("d", modifiers: .command)
             .disabled(state.selection.isEmpty)

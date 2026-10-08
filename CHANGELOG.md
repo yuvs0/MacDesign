@@ -20,8 +20,10 @@
 
 ### iPad
 - Long-press context menu opens beside the shape without a snapshot of the canvas.
-- Undo and Redo sit at the start of the trailing toolbar group on iPad: at the leading edge, beside
-  the document title, iPadOS 26 dropped them after a few edits.
+- Undo and Redo sit first in the trailing toolbar group on both platforms. At the leading edge,
+  beside the document title, iPadOS 26 dropped them after a few edits.
+- Fixed a crash on iPad when a text field got focus with a hardware keyboard: the Edit menu's ⌘A
+  duplicated the field's own Select All. The canvas now handles ⌘A and ⇧⌘A itself.
 
 ## 0.2.0 (8 October 2026)
 

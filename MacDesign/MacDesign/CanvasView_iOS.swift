@@ -217,8 +217,15 @@ final class DrawingCanvas: UIView, CanvasHost, UIGestureRecognizerDelegate, UICo
             cmds.append(UIKeyCommand(input: String(tool.shortcut), modifierFlags: [], action: #selector(keyCommand(_:))))
         }
         for c in cmds { c.wantsPriorityOverSystemBehavior = true }
+        // Select All and Deselect All live here rather than in the Edit menu, so they only exist
+        // while the canvas is first responder and never clash with a text field's own ⌘A.
+        cmds.append(UIKeyCommand(title: "Select All", action: #selector(selectAllObjects), input: "a", modifierFlags: .command))
+        cmds.append(UIKeyCommand(title: "Deselect All", action: #selector(deselectAllObjects), input: "a", modifierFlags: [.command, .shift]))
         return cmds
     }
+
+    @objc private func selectAllObjects() { controller.state?.selectAll() }
+    @objc private func deselectAllObjects() { controller.state?.deselectAll() }
 
     @objc private func keyCommand(_ cmd: UIKeyCommand) {
         var m: InputModifiers = []
