@@ -3,7 +3,10 @@
 .swiftpm/
 build/
 DerivedData/
-*.xcodeproj/xcuserdata/
+# Per-user Xcode state (window layout, recent files, breakpoints), at any depth.
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
 Package.resolved
 
 # Student work should not be committed. Keep real files in a local folder.
