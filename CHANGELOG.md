@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (8 October 2026)
+
+### Known bugs
+- On iPad, choosing an alternative drawing method from a tool's flyout is a little unreliable.
+- The icons for the alternative drawing methods are placeholders and don't yet read well.
 
 ### Tools
 - Press and hold a palette button for other ways to draw with that tool, as in 2D Design.

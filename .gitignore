@@ -16,3 +16,10 @@ dev-app.command
 dev-app.log
 dev-ql.command
 dev-ql.log
+
+# Agent notes and tool state stay local.
+HANDOFF.md
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.claude*
