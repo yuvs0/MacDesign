@@ -90,32 +90,8 @@ struct PropertiesPanel: View {
     /// Numbers the current drawing method needs (set size, length, angle, sides).
     @ViewBuilder
     private var methodRows: some View {
-        switch state.method {
-        case .rectSized:
-            numberRow("Width", $state.rectSize.width, unit: "mm")
-            numberRow("Height", $state.rectSize.height, unit: "mm")
-        case .lineLength:
-            numberRow("Length", $state.lineLength, unit: "mm")
-        case .lineAngle:
-            numberRow("Angle", $state.lineAngle, unit: "°")
-        case .polygon:
-            Stepper("Sides: \(state.polygonSides)", value: $state.polygonSides, in: 3...64)
-        case .star:
-            Stepper("Points: \(state.starPoints)", value: $state.starPoints, in: 3...64)
-            numberRow("Inner radius", Binding(get: { (state.starInnerRatio * 100).rounded() }, set: { state.starInnerRatio = $0 / 100 }), unit: "%")
-        default:
-            EmptyView()
-        }
-    }
-
-    private func numberRow(_ title: String, _ value: Binding<Double>, unit: String) -> some View {
-        HStack {
-            Text(title)
-            Spacer()
-            TextField("", value: value, format: .number)
-                .frame(width: 60)
-                .multilineTextAlignment(.trailing)
-            Text(unit).foregroundStyle(.secondary)
+        if let m = state.method, m.hasParameters {
+            MethodParameterFields(state: state, method: m)
         }
     }
 

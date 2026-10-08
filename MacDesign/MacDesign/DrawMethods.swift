@@ -51,7 +51,7 @@ enum DrawMethod: String, CaseIterable, Identifiable {
         case .rectCorners: return "Drag from one corner to the opposite one"
         case .rectBounding: return "Tap an object to draw the rectangle that bounds it"
         case .rectTilted: return "Tap both ends of one side, then drag out the width"
-        case .rectSized: return "Tap to place a rectangle of the size set in the inspector"
+        case .rectSized: return "Tap to place a rectangle of the set size; drag to choose which way it extends"
         case .ellipseCorners: return "Drag from one corner of the ellipse's box to the other"
         case .circleCentre: return "Drag from the centre to the edge"
         case .ovalCentre: return "Drag from the centre to a corner of the oval's box"
@@ -59,11 +59,11 @@ enum DrawMethod: String, CaseIterable, Identifiable {
         case .circleThreePoints: return "Tap two points on the circle, then drag the third"
         case .circleTangent: return "Tap the object to touch, then drag the circle's centre"
         case .lineEnds: return "Drag from one end to the other"
-        case .lineLength: return "Drag to set the direction; the length is set in the inspector"
-        case .lineAngle: return "Drag to set the length; the angle is set in the inspector"
+        case .lineLength: return "Drag to set the direction; the length is fixed"
+        case .lineAngle: return "Drag to set the length; the angle is fixed"
         case .lineTangent: return "Tap a circle or arc near the tangent, then drag the far end"
-        case .polygon: return "Drag from the centre to a corner; sides are set in the inspector"
-        case .star: return "Drag from the centre to a point; points are set in the inspector"
+        case .polygon: return "Drag from the centre to a corner"
+        case .star: return "Drag from the centre to a point"
         case .deleteObject: return "Tap an object to remove it, or sweep across several"
         case .deleteBetween: return "Tap a line or curve to remove it between its nearest crossings"
         }
@@ -108,6 +108,14 @@ enum DrawMethod: String, CaseIterable, Identifiable {
         switch self {
         case .rectTilted, .circleThreePoints: return 2
         default: return 0
+        }
+    }
+
+    /// Needs a number from the user (size, length, angle, sides), asked for when picked.
+    var hasParameters: Bool {
+        switch self {
+        case .rectSized, .lineLength, .lineAngle, .polygon, .star: return true
+        default: return false
         }
     }
 

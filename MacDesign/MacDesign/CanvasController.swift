@@ -643,7 +643,10 @@ final class CanvasController {
                 guard let hit = hitTest(p) else { s.flash(m.hint); return }
                 switch m {
                 case .rectBounding:
-                    if let b = s.objectBounds(hit) { s.add(DesignObject(style: s.newShapeStyle, shape: .rect(b))) }
+                    if let b = s.objectBounds(hit) {
+                        s.add(DesignObject(style: s.newShapeStyle, shape: .rect(b)))
+                        s.flash("Rectangle drawn around the \(hit.shape.kindName.lowercased())")
+                    }
                 case .lineTangent where circleOf(hit.shape) == nil:
                     s.flash("Tangent lines need a circle or an arc")
                 default:

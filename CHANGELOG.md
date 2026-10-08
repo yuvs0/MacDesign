@@ -7,7 +7,8 @@
   Rectangle: by corners, around an object, tilted (two taps for one side, then the width), or of a
   set size. Ellipse: by corners, circle or oval from the centre, circle through two or three
   points, tangent circle. Line: by ends, set length, set angle, tangent to a circle or arc.
-  Sizes, lengths, angles and side counts are set in the inspector's New Shapes section.
+  Methods that need a number (set size, length, angle, sides, star points) ask for it in a sheet
+  when picked; the values stay editable under New Shapes in the inspector.
 - Polygon tool (N) with a Star variant.
 - Delete tool variant: Delete Between Intersections removes the part of a line, arc, circle or
   path between its two nearest crossings, inside groups too (`Trim` in TSDKit).

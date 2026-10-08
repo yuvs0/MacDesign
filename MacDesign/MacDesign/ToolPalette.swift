@@ -24,30 +24,29 @@ private struct ToolButton: View {
     let tool: Tool
 
     private var methods: [DrawMethod] { DrawMethod.methods(for: tool) }
+    private var current: DrawMethod? { state.methods[tool] ?? methods.first }
     private var isSelected: Bool { state.tool == tool }
 
     var body: some View {
         Group {
             if methods.count > 1 {
                 Menu {
-                    Picker("Method", selection: Binding(
-                        get: { state.methods[tool] ?? methods[0] },
-                        set: { state.choose($0) }
-                    )) {
-                        ForEach(methods) { m in
-                            Label(m.title, systemImage: m.systemImage).tag(m)
+                    // Plain rows with a tick rather than a Picker: a Picker's choice didn't stick on
+                    // some iPads.
+                    ForEach(methods) { m in
+                        Toggle(isOn: Binding(get: { current == m }, set: { _ in state.choose(m) })) {
+                            Label(m.title, systemImage: m.systemImage)
                         }
                     }
-                    .pickerStyle(.inline)
                 } label: {
                     icon
                 } primaryAction: {
-                    state.tool = tool
+                    state.pick(tool)
                 }
                 .menuStyle(.button)
                 .menuIndicator(.hidden)
             } else {
-                Button { state.tool = tool } label: { icon }
+                Button { state.pick(tool) } label: { icon }
             }
         }
         .buttonStyle(.borderless)

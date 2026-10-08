@@ -116,12 +116,22 @@ final class EditorState: ObservableObject {
     /// The current tool's method, or nil for tools that have only one way of working.
     var method: DrawMethod? { methods[tool] ?? DrawMethod.defaultMethod(for: tool) }
 
-    /// Picks a tool and one of its methods.
+    /// Picks a tool and one of its methods, asking for the method's numbers if it has any.
     func choose(_ m: DrawMethod) {
         methods[m.tool] = m
         tool = m.tool
         flash(m.hint)
+        if m.hasParameters { parameterRequest = m }
     }
+
+    /// A tap on a palette button: the tool, and its numbers again if its method has some.
+    func pick(_ t: Tool) {
+        tool = t
+        if let m = method, m.hasParameters { parameterRequest = m }
+    }
+
+    /// Set to show the sheet asking for a method's numbers.
+    @Published var parameterRequest: DrawMethod?
 
     // Parameters for the methods that need a number, edited in the inspector.
     @Published var rectSize = TSDSize(width: 50, height: 30)

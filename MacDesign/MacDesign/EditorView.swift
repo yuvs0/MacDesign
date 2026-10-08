@@ -23,7 +23,7 @@ struct EditorView: View {
 
     /// One sheet at a time: several .sheet modifiers on one view don't present reliably on iPadOS.
     private enum ActiveSheet: String, Identifiable {
-        case explode, fillet, settings
+        case explode, fillet, settings, parameters
         var id: String { rawValue }
     }
 
@@ -31,12 +31,13 @@ struct EditorView: View {
         Binding(
             get: {
                 if state.settingsRequest { return .settings }
+                if state.parameterRequest != nil { return .parameters }
                 if state.filletRequest { return .fillet }
                 if state.explodeRequest { return .explode }
                 return nil
             },
             set: { v in
-                if v == nil { state.settingsRequest = false; state.filletRequest = false; state.explodeRequest = false }
+                if v == nil { state.settingsRequest = false; state.filletRequest = false; state.explodeRequest = false; state.parameterRequest = nil }
             }
         )
     }
@@ -88,6 +89,8 @@ struct EditorView: View {
             switch sheet {
             case .explode: ExplodeSheet(state: state)
             case .fillet: FilletSheet(state: state)
+            case .parameters:
+                if let m = state.parameterRequest { MethodParametersSheet(state: state, method: m) }
             case .settings:
                 NavigationStack {
                     SettingsView()
